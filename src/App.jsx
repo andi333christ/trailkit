@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { Header } from './components/Header.jsx'
 import { Map } from './components/Map.jsx'
 import { FilterBar } from './components/FilterBar.jsx'
@@ -9,9 +9,11 @@ import { RideHistory } from './components/RideHistory.jsx'
 import { SuggestionFlow } from './components/SuggestionFlow.jsx'
 import { Settings } from './components/Settings.jsx'
 import { Plans } from './components/Plans.jsx'
+import { BrushPanel, AddRouteModal } from './components/BrushPanel.jsx'
 import { useRoutes } from './hooks/useRoutes.js'
 import { useRides, useRouteRides } from './hooks/useRides.js'
-import { addRide, updateRide, deleteRide } from './stores/rideStore.js'
+import { addRide, updateRide, deleteRide, addPlan } from './stores/rideStore.js'
+import { computeElevationProfile } from './utils/elevation.js'
 import './styles/tokens.css'
 
 export default function App() {
@@ -21,7 +23,11 @@ export default function App() {
   const [tileLayer, setTileLayer] = useState('satellit')
   const [view, setView] = useState('map') // 'map' | 'stats' | 'history' | 'suggest' | 'settings' | 'plans'
   const [startPoint, setStartPoint] = useState(null)
-  const [endPoint, setEndPoint] = useState(null)
+
+  // Brush mode state
+  const [brushMode, setBrushMode] = useState(false)
+  const [brushChain, setBrushChain] = useState([]) // ordered array of route objects
+  const [showAddModal, setShowAddModal] = useState(false)
 
   const [filters, setFilters] = useState({
     difficulties: [],
@@ -41,6 +47,8 @@ export default function App() {
   const { routes, allRoutes, connectivity } = useRoutes(filters, filters.sortBy || 'name')
 
   const selectedRoute = allRoutes.find((r) => r.id === selectedRouteId) || null
+  const filteredCount = routes.length
+  const totalCount = allRoutes.length
 
   const handleLogRide = useCallback(async (rideData) => {
     await addRide(rideData)
@@ -57,17 +65,106 @@ export default function App() {
     await refresh()
   }, [refresh])
 
-  function handleRouteClick(routeId) {
+  // ── Elevation profile for brush chain ──────────────────────────────────
+  const elevationData = useMemo(() => {
+    if (brushChain.length === 0) return null
+    return computeElevationProfile(brushChain)
+  }, [brushChain])
+
+  // ── Route click handler ──────────────────────────────────────────────────
+  const handleRouteClick = useCallback((routeId) => {
+    const route = allRoutes.find((r) => r.id === routeId)
+    if (!route) return
+
+    if (brushMode) {
+      // Sticky brush logic
+      if (brushChain.length === 0) {
+        // Always accept the first route
+        setBrushChain([route])
+        setHighlightedRouteIds([routeId])
+        return
+      }
+
+      const lastRoute = brushChain[brushChain.length - 1]
+      const connectsTo = connectivity[lastRoute.id]?.connects_to || []
+
+      if (connectsTo.includes(routeId)) {
+        // Append to chain
+        const next = [...brushChain, route]
+        setBrushChain(next)
+        setHighlightedRouteIds(next.map((r) => r.id))
+      } else {
+        // Show hint: this route doesn't connect to the last one
+        setHighlightedRouteIds([...brushChain.map((r) => r.id), routeId])
+      }
+      return
+    }
+
+    // Normal mode
     setSelectedRouteId(routeId)
+    setHighlightedRouteIds([])
+  }, [brushMode, brushChain, connectivity, allRoutes])
+
+  // ── Brush actions ────────────────────────────────────────────────────────
+  function handleBrushClose() {
+    setBrushMode(false)
+    setBrushChain([])
     setHighlightedRouteIds([])
   }
 
-  function handleSuggestClick() {
-    setView('suggest')
+  function handleBrushRemove(routeId) {
+    const idx = brushChain.findIndex((r) => r.id === routeId)
+    if (idx === -1) return
+    const next = brushChain.filter((_, i) => i !== idx)
+    setBrushChain(next)
+    setHighlightedRouteIds(next.map((r) => r.id))
   }
 
-  function handleColorModeChange(mode) {
-    setColorMode(mode)
+  function handleBrushClear() {
+    setBrushChain([])
+    setHighlightedRouteIds([])
+  }
+
+  async function handleBrushSave(routeIds, chainName) {
+    const profile = elevationData
+    await addPlan({
+      name: chainName,
+      routeIds,
+      totalDistanceKm: elevationData?.totalDistKm ?? brushChain.reduce((s, r) => s + (r.distance_km || 0), 0),
+      totalDurationMinutes: 0,
+      totalElevationGain: elevationData?.totalEleGain ?? 0,
+      elevationProfile: profile ? {
+        points: profile.points,
+        totalDistKm: profile.totalDistKm,
+        totalEleGain: profile.totalEleGain,
+        totalEleLoss: profile.totalEleLoss,
+      } : null,
+    })
+    setBrushChain([])
+    setHighlightedRouteIds([])
+    setBrushMode(false)
+    setView('plans')
+  }
+
+  function handleAddFromList() {
+    setShowAddModal(true)
+  }
+
+  function handleAddFromModal(route) {
+    setBrushChain((prev) => {
+      const next = [...prev, route]
+      setHighlightedRouteIds(next.map((r) => r.id))
+      return next
+    })
+    setShowAddModal(false)
+  }
+
+  // ── "Ich will fahren" ────────────────────────────────────────────────────
+  function handleSuggestClick() {
+    setBrushMode(true)
+    setBrushChain([])
+    setHighlightedRouteIds([])
+    setView('map')
   }
 
   function handleMapClick([lon, lat]) {
@@ -80,9 +177,6 @@ export default function App() {
     setHighlightedRouteIds(ids)
   }
 
-  const filteredCount = routes.length
-  const totalCount = allRoutes.length
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', overflow: 'hidden' }}>
       <Header
@@ -91,11 +185,11 @@ export default function App() {
         onHistoryClick={() => setView(view === 'history' ? 'map' : 'history')}
         onPlansClick={() => setView(view === 'plans' ? 'map' : 'plans')}
         onSettingsClick={() => setView(view === 'settings' ? 'map' : 'settings')}
-        onHomeClick={() => setView('map')}
+        onHomeClick={() => { setView('map'); setBrushMode(false); setBrushChain([]) }}
       />
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
-        {/* Map + sidebar */}
+        {/* Map */}
         <div style={{ flex: 1, position: 'relative' }}>
           <Map
             routes={routes}
@@ -126,7 +220,7 @@ export default function App() {
             {[['difficulty', 'Schwierigkeit'], ['coverage', 'Entdeckt']].map(([mode, label]) => (
               <button
                 key={mode}
-                onClick={() => handleColorModeChange(mode)}
+                onClick={() => setColorMode(mode)}
                 style={{
                   padding: '4px 10px', fontSize: 11, fontWeight: 500, borderRadius: 3,
                   background: colorMode === mode ? 'var(--accent)' : 'transparent',
@@ -139,7 +233,27 @@ export default function App() {
             ))}
           </div>
 
-          {/* Sidebar: route list */}
+          {/* Brush mode banner */}
+          {brushMode && (
+            <div style={{
+              position: 'absolute', top: 56, left: '50%', transform: 'translateX(-50%)',
+              background: 'var(--accent)',
+              color: 'var(--bg-primary)',
+              padding: '5px 14px',
+              borderRadius: 'var(--radius)',
+              fontSize: 12, fontWeight: 600,
+              zIndex: 15,
+              pointerEvents: 'none',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/>
+              </svg>
+              Planungsmodus — Klicke Strecken an um sie zu verbinden
+            </div>
+          )}
+
+          {/* Sidebar */}
           <div style={{
             position: 'absolute', top: 0, left: 0, bottom: 0, width: 320,
             display: 'flex', flexDirection: 'column',
@@ -166,7 +280,7 @@ export default function App() {
         </div>
 
         {/* Route detail right panel */}
-        {selectedRoute && view === 'map' && (
+        {selectedRoute && view === 'map' && !brushMode && (
           <RouteDetailWithRides
             route={selectedRoute}
             riddenIds={riddenIds}
@@ -177,8 +291,22 @@ export default function App() {
           />
         )}
 
-        {/* SuggestionFlow right panel */}
-        {view === 'suggest' && (
+        {/* Brush panel */}
+        {(brushMode || brushChain.length > 0) && (
+          <BrushPanel
+            chain={brushChain}
+            allRoutes={allRoutes}
+            elevationData={elevationData}
+            onRemove={handleBrushRemove}
+            onClear={handleBrushClear}
+            onSave={handleBrushSave}
+            onAddFromList={handleAddFromList}
+            onClose={handleBrushClose}
+          />
+        )}
+
+        {/* SuggestionFlow */}
+        {view === 'suggest' && !brushMode && (
           <SuggestionFlow
             allRoutes={allRoutes}
             connectivity={connectivity}
@@ -191,7 +319,7 @@ export default function App() {
           />
         )}
 
-        {/* Overlays: full-screen */}
+        {/* Overlays */}
         {view === 'stats' && (
           <CoverageStats rides={rides} riddenIds={riddenIds} allRoutes={allRoutes} />
         )}
@@ -205,6 +333,17 @@ export default function App() {
           <Plans allRoutes={allRoutes} onClose={() => setView('map')} onHighlightRoutes={handleHighlightRoutes} />
         )}
       </div>
+
+      {/* Add route modal */}
+      {showAddModal && (
+        <AddRouteModal
+          chain={brushChain}
+          allRoutes={allRoutes}
+          connectivity={connectivity}
+          onAdd={handleAddFromModal}
+          onClose={() => setShowAddModal(false)}
+        />
+      )}
     </div>
   )
 }

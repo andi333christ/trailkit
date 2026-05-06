@@ -70,7 +70,12 @@ export async function getRideCount() {
 
 export async function addPlan(plan) {
   const db = getDB()
-  return db[STORE_PLANS].add({ ...plan, createdAt: new Date().toISOString() })
+  const { elevationProfile, ...rest } = plan
+  return db[STORE_PLANS].add({
+    ...rest,
+    elevationProfileJson: elevationProfile ? JSON.stringify(elevationProfile) : null,
+    createdAt: new Date().toISOString(),
+  })
 }
 
 export async function updatePlan(id, changes) {
@@ -85,7 +90,11 @@ export async function deletePlan(id) {
 
 export async function getAllPlans() {
   const db = getDB()
-  return db[STORE_PLANS].orderBy('createdAt').reverse().toArray()
+  const plans = await db[STORE_PLANS].orderBy('createdAt').reverse().toArray()
+  return plans.map((p) => ({
+    ...p,
+    elevationProfile: p.elevationProfileJson ? JSON.parse(p.elevationProfileJson) : null,
+  }))
 }
 
 // ── Preferences ─────────────────────────────────────────────────────────────
