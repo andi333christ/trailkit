@@ -1,25 +1,22 @@
-import { useState } from 'react'
 import { t } from '../i18n/de.js'
 import { downloadChainGPX } from '../utils/export.js'
+import { usePlans } from '../hooks/useRides.js'
 
 export function Plans({ allRoutes, onClose, onHighlightRoutes }) {
-  const { plans, addPlan, deletePlan } = usePlanState()
-
-  function handleHighlight(plan) {
-    onHighlightRoutes(plan.routeIds)
-  }
-
-  function handleExport(plan) {
-    const routes = plan.routeIds.map((id) => allRoutes.find((r) => r.id === id)).filter(Boolean)
-    if (!routes.length) return
-    const name = plan.name || routes.slice(0, 3).map((r) => r.title).join(' > ')
-    downloadChainGPX(routes, name)
-  }
+  const { plans, addPlan, deletePlan } = usePlans()
 
   async function handleDelete(id) {
     if (window.confirm(t('planLoeschenConfirm'))) {
       await deletePlan(id)
     }
+  }
+
+  function handleExport(plan) {
+    const routes = (plan.routeIds || [])
+      .map((id) => allRoutes.find((r) => r.id === id))
+      .filter(Boolean)
+    if (!routes.length) return
+    downloadChainGPX(routes, plan.name || 'Plan')
   }
 
   return (
@@ -47,78 +44,59 @@ export function Plans({ allRoutes, onClose, onHighlightRoutes }) {
             <path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
           </svg>
           <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{t('keinPlan')}</p>
+          <p style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+            Speichere einen Vorschlag aus „Ich will fahren"
+          </p>
         </div>
       ) : (
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {plans.map((plan) => {
-            const routeCount = plan.routeIds?.length || 0
-            return (
-              <div key={plan.id} style={{
-                padding: 'var(--sp-2)',
-                borderBottom: '1px solid var(--border)',
-              }}>
-                <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 6 }}>{plan.name}</div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
-                  <span className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                    {routeCount} {routeCount === 1 ? 'Strecke' : 'Strecken'}
-                  </span>
-                  {plan.totalDistanceKm && (
-                    <span className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                      ↔ {plan.totalDistanceKm.toFixed(1)} km
-                    </span>
-                  )}
-                  {plan.totalDurationMinutes && (
-                    <span className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                      ⏱ {plan.totalDurationMinutes} min
-                    </span>
-                  )}
-                  <span className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-                    {new Date(plan.createdAt).toLocaleDateString('de-AT')}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn-ghost" onClick={() => handleHighlight(plan)} style={{ fontSize: 12 }}>
-                    Zeigen
-                  </button>
-                  <button className="btn-ghost" onClick={() => handleExport(plan)} style={{ fontSize: 12 }}>
-                    GPX
-                  </button>
-                  <button
-                    className="btn-ghost"
-                    onClick={() => handleDelete(plan.id)}
-                    style={{ fontSize: 12, color: 'var(--difficulty-schwer)', marginLeft: 'auto' }}
-                  >
-                    {t('delete')}
-                  </button>
-                </div>
+          {plans.map((plan) => (
+            <div key={plan.id} style={{
+              padding: 'var(--sp-2)',
+              borderBottom: '1px solid var(--border)',
+            }}>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 6, lineHeight: 1.3 }}>
+                {plan.name}
               </div>
-            )
-          })}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+                {(plan.routeIds || []).length > 0 && (
+                  <span className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                    {(plan.routeIds || []).length} Strecken
+                  </span>
+                )}
+                {plan.totalDistanceKm > 0 && (
+                  <span className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                    ↔ {plan.totalDistanceKm.toFixed(1)} km
+                  </span>
+                )}
+                {plan.totalElevationGain > 0 && (
+                  <span className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                    ↑ {plan.totalElevationGain} Hm
+                  </span>
+                )}
+                <span className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
+                  {new Date(plan.createdAt).toLocaleDateString('de-AT')}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn-ghost" onClick={() => onHighlightRoutes(plan.routeIds || [])} style={{ fontSize: 12 }}>
+                  Zeigen
+                </button>
+                <button className="btn-ghost" onClick={() => handleExport(plan)} style={{ fontSize: 12 }}>
+                  GPX
+                </button>
+                <button
+                  className="btn-ghost"
+                  onClick={() => handleDelete(plan.id)}
+                  style={{ fontSize: 12, color: 'var(--difficulty-schwer)', marginLeft: 'auto' }}
+                >
+                  {t('delete')}
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
   )
-}
-
-// Local state — plans are stored via Dexie but we manage the list here
-function usePlanState() {
-  const [plans, setPlans] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  async function load() {
-    const { getAllPlans } = await import('../stores/rideStore.js')
-    const p = await getAllPlans()
-    setPlans(p)
-    setLoading(false)
-  }
-
-  useState(() => { load() })
-
-  async function handleDeletePlan(id) {
-    const { deletePlan: del } = await import('../stores/rideStore.js')
-    await del(id)
-    await load()
-  }
-
-  return { plans, loading, addPlan: async () => {}, deletePlan: handleDeletePlan }
 }

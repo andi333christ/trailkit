@@ -95,12 +95,6 @@ export function downloadChainGPX(routes, chainName) {
   downloadFile(generateChainGPX(routes, chainName), `${chainName}.gpx`, 'application/gpx+xml')
 }
 
-const DIFFICULTY_COLOR = {
-  leicht: '#6b9e78',
-  mittel: '#c4943d',
-  schwer: '#c45a3c',
-}
-
 /**
  * Generate a KML string for one or more routes.
  */

@@ -18,7 +18,7 @@ export default function App() {
   const [selectedRouteId, setSelectedRouteId] = useState(null)
   const [highlightedRouteIds, setHighlightedRouteIds] = useState([])
   const [colorMode, setColorMode] = useState('difficulty')
-  const [tileLayer, setTileLayer] = useState('gelande')
+  const [tileLayer, setTileLayer] = useState('satellit')
   const [view, setView] = useState('map') // 'map' | 'stats' | 'history' | 'suggest' | 'settings' | 'plans'
   const [startPoint, setStartPoint] = useState(null)
   const [endPoint, setEndPoint] = useState(null)
@@ -184,9 +184,7 @@ export default function App() {
             connectivity={connectivity}
             rideHistory={rides}
             startPoint={startPoint}
-            endPoint={endPoint}
-            onStartPointSet={setStartPoint}
-            onEndPointSet={setEndPoint}
+            onStartPointSet={(pt) => { setStartPoint(pt); if (pt) setView('map') }}
             onClose={() => { setView('map'); setHighlightedRouteIds([]) }}
             onRouteClick={(id) => { setSelectedRouteId(id); setView('map') }}
             onHighlightRoutes={handleHighlightRoutes}
