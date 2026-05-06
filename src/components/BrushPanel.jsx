@@ -164,7 +164,7 @@ export function BrushPanel({
 
       <div className="brush-panel__body">
         {/* Chain */}
-        {chain.length > 0 && (
+        {(chain && chain.length > 0) && (
           <div className="brush-panel__chain">
             <div className="brush-panel__chain-header">
               <span className="label">Kette</span>
@@ -206,7 +206,7 @@ export function BrushPanel({
         )}
 
         {/* Stats */}
-        {chain.length > 0 && (
+        {(chain && chain.length > 0) && (
           <div className="brush-panel__stats">
             <div className="brush-panel__stat">
               <span className="mono brush-panel__stat-val">{totalKm.toFixed(1)}</span>
@@ -228,7 +228,7 @@ export function BrushPanel({
         )}
 
         {/* Elevation profile */}
-        {chain.length > 0 && (
+        {(chain && chain.length > 0) && (
           <div className="brush-panel__elevation">
             <div className="label" style={{ marginBottom: 6 }}>Höhenprofil</div>
             <ElevationProfile profile={elevationData} />
@@ -236,7 +236,7 @@ export function BrushPanel({
         )}
 
         {/* Add from list button */}
-        {chain.length > 0 && (
+        {(chain && chain.length > 0) && (
           <button
             className="btn-ghost brush-panel__add-btn"
             onClick={onAddFromList}
@@ -251,7 +251,7 @@ export function BrushPanel({
       </div>
 
       {/* Footer actions */}
-      {(chain.length > 0 || (waypoints !== undefined && waypoints.length > 0)) && (
+      {((chain && chain.length > 0) || (waypoints !== undefined && waypoints.length > 0)) && (
         <div className="brush-panel__footer">
           {waypoints === undefined && (
             <button
