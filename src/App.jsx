@@ -222,9 +222,29 @@ export default function App() {
     if (newWaypoints.length >= 2) {
       const prevWp = newWaypoints[newWaypoints.length - 2]
       const nodeEdgesIdx = new Map(Object.entries(network.node_edges || {}))
-      const result = dijkstra(network, nodeEdgesIdx, prevWp.nodeId, snap.nodeId)
-      console.log('[App] dijkstra result:', result ? `${result.edgeIds.length} edges, ${result.distanceM}m` : 'NULL')
-      if (!result) {
+      // dijkstra runs in a deferred callback to avoid hook issues
+      setTimeout(() => {
+        const result = dijkstra(network, nodeEdgesIdx, prevWp.nodeId, snap.nodeId)
+        console.log('[App] dijkstra result:', result ? `${result.edgeIds.length} edges, ${result.distanceM}m` : 'NULL')
+        if (!result) {
+          setToast({ message: t('keineVerbindung'), id: Date.now() })
+          setTimeout(() => setToast(null), 3000)
+          setPlannedPath(null)
+          return
+        }
+        const segments = result.edgeIds.map((eid) => {
+          const edge = network.edges[eid]
+          return { edgeId: eid, geometry: edge.geometry, source_route_id: edge.source_route_id }
+        })
+        setPlannedPath({
+          segments,
+          totalDistM: result.distanceM,
+          totalEleGainM: result.eleGainM,
+          totalEleLossM: result.eleLossM,
+        })
+        setHighlightedRouteIds([...new Set(segments.map((s) => s.source_route_id))])
+      }, 0)
+      return
         // No path between these waypoints — still add the waypoint, show warning
         setToast({ message: t('keineVerbindung'), id: Date.now() })
         setTimeout(() => setToast(null), 3000)
