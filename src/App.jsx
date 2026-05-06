@@ -202,9 +202,13 @@ export default function App() {
   }
 
   function handlePlannerClick([lng, lat]) {
-    if (!network || !edgeBBoxIndex) return
+    if (!network || !edgeBBoxIndex) {
+      console.log('[App] handlePlannerClick: network or edgeBBoxIndex not ready', { network: !!network, edgeBBoxIndex: !!edgeBBoxIndex })
+      return
+    }
     const snap = snapToTrail([lng, lat], network, edgeBBoxIndex)
     if (!snap) {
+      console.log('[App] handlePlannerClick: snap returned null', [lng, lat])
       setToast({ message: t('keinWegInDerNaehe'), id: Date.now() })
       setTimeout(() => setToast(null), 2000)
       return
@@ -213,10 +217,13 @@ export default function App() {
     const newWaypoints = [...waypoints, newWp]
     setWaypoints(newWaypoints)
     setSnapPreview(null)
+    console.log('[App] waypoints:', newWaypoints.length, '| snap:', snap.nodeId)
 
     if (newWaypoints.length >= 2) {
       const prevWp = newWaypoints[newWaypoints.length - 2]
-      const result = dijkstra(network, edgeBBoxIndex, prevWp.nodeId, snap.nodeId)
+      const nodeEdgesIdx = new Map(Object.entries(network.node_edges || {}))
+      const result = dijkstra(network, nodeEdgesIdx, prevWp.nodeId, snap.nodeId)
+      console.log('[App] dijkstra result:', result ? `${result.edgeIds.length} edges, ${result.distanceM}m` : 'NULL')
       if (!result) {
         // No path between these waypoints — still add the waypoint, show warning
         setToast({ message: t('keineVerbindung'), id: Date.now() })
@@ -257,7 +264,8 @@ export default function App() {
     // Re-route from idx-1 to last waypoint
     const fromWp = newWps[idx - 1]
     const toWp = newWps[newWps.length - 1]
-    const result = dijkstra(network, edgeBBoxIndex, fromWp.nodeId, toWp.nodeId)
+    const nodeEdgesIdx2 = new Map(Object.entries(network.node_edges || {}))
+      const result = dijkstra(network, nodeEdgesIdx2, fromWp.nodeId, toWp.nodeId)
     if (!result) {
       setPlannedPath(null)
       return
