@@ -74,3 +74,66 @@ function haversineM([lon1, lat1], [lon2, lat2]) {
   const a = Math.sin(dPhi / 2) ** 2 + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLam / 2) ** 2
   return EARTH_RADIUS_M * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
+
+/**
+ * Elevation profile for a planned path (array of edge segments).
+ * @param {Array<{geometry: [[lon,lat,ele?],...]}>} segments
+ * @returns {{ points, totalDistKm, totalEleGain, totalEleLoss }}
+ */
+export function computePathElevationProfile(segments) {
+  if (!segments || segments.length === 0) return null
+
+  const allPoints = []
+  for (let s = 0; s < segments.length; s++) {
+    const geom = segments[s].geometry
+    if (!geom || geom.length === 0) continue
+    if (s === 0) {
+      allPoints.push(...geom)
+    } else {
+      const first = geom[0]
+      const last = allPoints[allPoints.length - 1]
+      if (last && last[0] === first[0] && last[1] === first[1]) {
+        allPoints.push(...geom.slice(1))
+      } else {
+        allPoints.push(...geom)
+      }
+    }
+  }
+
+  if (allPoints.length < 2) return null
+
+  const result = []
+  let cumDistM = 0
+  let cumEleGain = 0
+  let cumEleLoss = 0
+  let lastEle = null
+
+  for (let i = 0; i < allPoints.length; i++) {
+    const pt = allPoints[i]
+    const lon = pt[0], lat = pt[1], ele = pt.length >= 3 ? pt[2] : null
+
+    if (i > 0) {
+      cumDistM += haversineM([allPoints[i-1][0], allPoints[i-1][1]], [lon, lat])
+    }
+
+    let cumulativeEleM = 0
+    if (ele !== null && ele !== undefined) {
+      if (lastEle !== null) {
+        const diff = ele - lastEle
+        if (diff > 0) cumEleGain += diff
+        else cumEleLoss += Math.abs(diff)
+      }
+      lastEle = ele
+      cumulativeEleM = cumEleGain - cumEleLoss
+    }
+
+    result.push({ distKm: cumDistM / 1000, eleM: ele, cumulativeEleM })
+  }
+
+  return {
+    points: result,
+    totalDistKm: Math.round(cumDistM / 1000 * 100) / 100,
+    totalEleGain: Math.round(cumEleGain),
+    totalEleLoss: Math.round(cumEleLoss),
+  }
+}

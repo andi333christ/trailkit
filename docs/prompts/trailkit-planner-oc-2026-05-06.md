@@ -374,21 +374,22 @@ rueckgaengig: 'Rückgängig',
 ## Open questions (confirm with Simon before implementing)
 
 1. **Planner vs existing brush coexistence** — completely replace the old
-   click-brush mode, or keep both (old for quick whole-route chaining, new for
-   precision routing)?
+   click-brush mode. The new waypoint planner handles both partial segment
+   selection AND whole-route chaining (the user simply drops waypoints at the
+   start and end of a full named route). No coexistence needed.
 
-2. **trail_network.json size** — with ~150 routes × ~200 trackpoints each,
-   the JSON could be 2–4 MB on top of existing 3.3 MB routes.json. Accepted,
-   or implement lazy-load?
+2. **trail_network.json size** — accepted as-is. The file is built once by a
+   Python script (not loaded at runtime for data fetching). Frontend loads it
+   once on planner open. 2–4 MB is fine for this use case.
 
 ---
 
 ## Delivery checklist
 
 **Python:**
-- [ ] `build_routes.py`: elevation preserved in `geometry.coordinates`
-- [ ] `scripts/build_trail_network.py`: runs without error, produces valid JSON
-- [ ] `trail_network.json` generated: > 0 nodes, > 0 edges, build stats printed
+- [x] `build_routes.py`: elevation preserved in `geometry.coordinates`
+- [x] `scripts/build_trail_network.py`: runs without error, produces valid JSON
+- [x] `trail_network.json` generated: > 0 nodes, > 0 edges, build stats printed
 
 **Frontend:**
 - [ ] `src/utils/trailSnap.js`: `snapToTrail` + `buildEdgeBBoxIndex` exported

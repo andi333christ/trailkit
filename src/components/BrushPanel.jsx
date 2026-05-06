@@ -12,6 +12,11 @@ export function BrushPanel({
   onSave,
   onAddFromList,
   onClose,
+  // Planner props
+  waypoints,
+  plannedPath,
+  onRemoveWaypoint,
+  onPlannerSave,
 }) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -50,20 +55,103 @@ export function BrushPanel({
         </button>
       </div>
 
-      {/* Hints when empty */}
-      {chain.length === 0 && showHints && (
+      {/* Planner waypoint view */}
+      {waypoints !== undefined && waypoints.length === 0 && (
         <div className="brush-panel__hint">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.5">
             <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
           </svg>
-          <p>Klicke Strecken auf der Karte an, um sie der Kette hinzuzufügen.</p>
-          <p>Verbundene Strecken werden automatisch vorgeschlagen.</p>
+          <p>{t('wegpunktSetzen')}</p>
+        </div>
+      )}
+
+      {waypoints !== undefined && waypoints.length > 0 && (
+        <div className="brush-panel__chain">
+          <div className="brush-panel__chain-header">
+            <span className="label">Wegpunkte</span>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+              {waypoints.length}
+            </span>
+          </div>
+
+          <div className="brush-panel__chain-list">
+            {waypoints.map((wp, i) => (
+              <div key={wp.id} className="brush-panel__chain-item">
+                <div className="brush-panel__chain-idx">{i + 1}</div>
+                <div className="brush-panel__chain-info">
+                  <button
+                    className="brush-panel__route-name"
+                    onClick={() => onRemoveWaypoint?.(wp.id)}
+                    title={t('wegpunktEntfernen')}
+                  >
+                    Wegpunkt {i + 1}
+                  </button>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <span className="mono" style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
+                      {wp.coords[0].toFixed(4)}, {wp.coords[1].toFixed(4)}
+                    </span>
+                  </div>
+                </div>
+                {i < waypoints.length - 1 && (
+                  <div className="brush-panel__chain-connector">
+                    <div className="brush-panel__connector-line" />
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2">
+                      <line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>
+                    </svg>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Stats for planned path */}
+      {waypoints !== undefined && plannedPath && (
+        <div className="brush-panel__stats">
+          <div className="brush-panel__stat">
+            <span className="mono brush-panel__stat-val">{(plannedPath.totalDistM / 1000).toFixed(1)}</span>
+            <span className="label">km</span>
+          </div>
+          <div className="brush-panel__stat">
+            <span className="mono brush-panel__stat-val">{plannedPath.totalEleGainM}</span>
+            <span className="label">Hm ↑</span>
+          </div>
+          {plannedPath.totalEleLossM > 0 && (
+            <div className="brush-panel__stat">
+              <span className="mono brush-panel__stat-val" style={{ color: 'var(--difficulty-leicht)' }}>
+                {plannedPath.totalEleLossM}
+              </span>
+              <span className="label">Hm ↓</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Elevation profile for planned path */}
+      {waypoints !== undefined && plannedPath && (
+        <div className="brush-panel__elevation">
+          <div className="label" style={{ marginBottom: 6 }}>Höhenprofil</div>
+          <ElevationProfile profile={elevationData} />
+        </div>
+      )}
+
+      {/* Undo / clear buttons for planner */}
+      {waypoints !== undefined && waypoints.length > 0 && (
+        <div style={{ padding: '0 var(--sp-2) var(--sp-1)', display: 'flex', gap: 6 }}>
           <button
             className="btn-ghost"
-            onClick={() => setShowHints(false)}
-            style={{ fontSize: 11, color: 'var(--text-tertiary)', padding: '2px 6px' }}
+            onClick={() => onRemoveWaypoint?.(waypoints[waypoints.length - 1].id)}
+            style={{ fontSize: 12, color: 'var(--text-tertiary)' }}
           >
-            Verbergen
+            {t('rueckgaengig')}
+          </button>
+          <button
+            className="btn-ghost"
+            onClick={onClear}
+            style={{ fontSize: 12, color: 'var(--text-tertiary)' }}
+          >
+            Leeren
           </button>
         </div>
       )}
@@ -157,30 +245,46 @@ export function BrushPanel({
       </div>
 
       {/* Footer actions */}
-      {chain.length > 0 && (
+      {(chain.length > 0 || (waypoints !== undefined && waypoints.length > 0)) && (
         <div className="brush-panel__footer">
-          <button
-            className="btn-ghost"
-            onClick={onClear}
-            style={{ fontSize: 12, color: 'var(--text-tertiary)' }}
-          >
-            Leeren
-          </button>
-          <button
-            className="btn-ghost"
-            onClick={handleExport}
-            style={{ fontSize: 12 }}
-          >
-            GPX
-          </button>
-          <button
-            className="btn-primary"
-            onClick={handleSave}
-            disabled={saving || chain.length === 0}
-            style={{ fontSize: 12, flex: 1 }}
-          >
-            {saving ? '…' : saved ? '✓ Gespeichert' : 'Plan speichern'}
-          </button>
+          {waypoints === undefined && (
+            <button
+              className="btn-ghost"
+              onClick={onClear}
+              style={{ fontSize: 12, color: 'var(--text-tertiary)' }}
+            >
+              Leeren
+            </button>
+          )}
+          {waypoints === undefined && (
+            <button className="btn-ghost" onClick={handleExport} style={{ fontSize: 12 }}>
+              GPX
+            </button>
+          )}
+          {waypoints !== undefined && (
+            <button className="btn-ghost" onClick={onPlannerSave} style={{ fontSize: 12 }}>
+              GPX
+            </button>
+          )}
+          {waypoints === undefined && (
+            <button
+              className="btn-primary"
+              onClick={handleSave}
+              disabled={saving || chain.length === 0}
+              style={{ fontSize: 12, flex: 1 }}
+            >
+              {saving ? '…' : saved ? '✓ Gespeichert' : 'Plan speichern'}
+            </button>
+          )}
+          {waypoints !== undefined && (
+            <button
+              className="btn-primary"
+              onClick={onPlannerSave}
+              style={{ fontSize: 12, flex: 1 }}
+            >
+              GPX Export
+            </button>
+          )}
         </div>
       )}
     </div>

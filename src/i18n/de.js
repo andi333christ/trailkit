@@ -106,6 +106,14 @@ export const de = {
   layerKarte: 'Karte (CartoDB)',
   layerSatellit: 'Satellit (ArcGIS)',
 
+  // Planner
+  planungsmodus: 'Planungsmodus',
+  wegpunktSetzen: 'Klicke auf einen Weg, um einen Wegpunkt zu setzen.',
+  keinWegInDerNaehe: 'Kein Weg in der Nahe.',
+  keineVerbindung: 'Keine Verbindung',
+  wegpunktEntfernen: 'Wegpunkt entfernen',
+  rueckgaengig: 'Ruckgangig',
+
   // Misc
   loading: 'Laden…',
   error: 'Fehler',

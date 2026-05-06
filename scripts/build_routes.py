@@ -330,7 +330,7 @@ def main():
         pts = trackpoints.get(slug, [])
         
         if pts:
-            coords = [[p[0], p[1]] for p in pts]
+            coords = [[p[0], p[1], p[2]] if len(p) >= 3 and p[2] is not None else [p[0], p[1]] for p in pts]
             coords_simplified = simplify_coords(coords)
             
             route['geometry'] = {

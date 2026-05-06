@@ -43,6 +43,13 @@ export function Map({
   onMapClick,
   startPoint,
   onStartPointSet,
+  // Planner props
+  plannerMode = false,
+  plannedPath = null,
+  planWaypoints = [],
+  snapPreview = null,
+  onPlannerClick,
+  onPlannerMouseMove,
 }) {
   const mapContainer = useRef(null)
   const map = useRef(null)
@@ -53,6 +60,10 @@ export function Map({
 
   useEffect(() => { onMapClickRef.current = onMapClick }, [onMapClick])
   useEffect(() => { onRouteClickRef.current = onRouteClick }, [onRouteClick])
+  const onPlannerClickRef = useRef(onPlannerClick)
+  const onPlannerMouseMoveRef = useRef(onPlannerMouseMove)
+  useEffect(() => { onPlannerClickRef.current = onPlannerClick }, [onPlannerClick])
+  useEffect(() => { onPlannerMouseMoveRef.current = onPlannerMouseMove }, [onPlannerMouseMove])
 
   // Init map
   useEffect(() => {
@@ -152,6 +163,57 @@ export function Map({
           },
         })
 
+        // ── Planner sources + layers ──────────────────────────────────────
+        map.current.addSource('plan-path', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        })
+        map.current.addLayer({
+          id: 'plan-path-line',
+          type: 'line',
+          source: 'plan-path',
+          paint: {
+            'line-color': '#d4a853',
+            'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5, 15, 9],
+            'line-opacity': 0.9,
+            'line-cap': 'round',
+            'line-join': 'round',
+          },
+        })
+
+        map.current.addSource('plan-waypoints', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        })
+        map.current.addLayer({
+          id: 'plan-waypoints-circle',
+          type: 'circle',
+          source: 'plan-waypoints',
+          paint: {
+            'circle-radius': 8,
+            'circle-color': '#d4a853',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff',
+          },
+        })
+        map.current.addSource('snap-preview', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        })
+        map.current.addLayer({
+          id: 'snap-preview-circle',
+          type: 'circle',
+          source: 'snap-preview',
+          paint: {
+            'circle-radius': 5,
+            'circle-color': '#ffffff',
+            'circle-opacity': 0.85,
+            'circle-stroke-width': 1.5,
+            'circle-stroke-color': '#d4a853',
+          },
+        })
+
+
         setMapLoaded(true)
 
         // Fit all routes on initial load so nothing is cut off
@@ -174,7 +236,11 @@ export function Map({
       })
 
       map.current.on('click', (e) => {
-        onMapClickRef.current?.([e.lngLat.lng, e.lngLat.lat])
+        if (plannerMode) {
+          onPlannerClickRef.current?.([e.lngLat.lng, e.lngLat.lat])
+        } else {
+          onMapClickRef.current?.([e.lngLat.lng, e.lngLat.lat])
+        }
       })
 
       map.current.on('route-click', (e) => {
@@ -182,7 +248,17 @@ export function Map({
       })
 
       let hoveredRouteId = null
+      let lastPlannerMove = 0
       map.current.on('mousemove', 'routes-simplified', (e) => {
+        if (plannerMode) {
+          const now = Date.now()
+          if (now - lastPlannerMove > 16) { // ~60fps throttle
+            onPlannerMouseMoveRef.current?.([e.lngLat.lng, e.lngLat.lat])
+            lastPlannerMove = now
+          }
+          map.current.getCanvas().style.cursor = 'crosshair'
+          return
+        }
         if (e.features.length > 0) {
           if (hoveredRouteId !== null) {
             map.current.setFeatureState({ source: 'routes', id: hoveredRouteId }, { hovered: false })
@@ -193,11 +269,15 @@ export function Map({
         }
       })
       map.current.on('mouseleave', 'routes-simplified', () => {
-        if (hoveredRouteId !== null) {
-          map.current.setFeatureState({ source: 'routes', id: hoveredRouteId }, { hovered: false })
+        if (plannerMode) {
+          map.current.getCanvas().style.cursor = 'crosshair'
+        } else {
+          if (hoveredRouteId !== null) {
+            map.current.setFeatureState({ source: 'routes', id: hoveredRouteId }, { hovered: false })
+          }
+          hoveredRouteId = null
+          map.current.getCanvas().style.cursor = ''
         }
-        hoveredRouteId = null
-        map.current.getCanvas().style.cursor = ''
       })
 
       cleanup = () => {
@@ -298,7 +378,53 @@ export function Map({
     }
   }, [startPoint, mapLoaded])
 
-  // Fly to selected route
+    // ── Planner reactive sources ────────────────────────────────────────────────
+  // plan-path
+  useEffect(() => {
+    if (!mapLoaded || !map.current) return
+    const source = map.current.getSource('plan-path')
+    if (!source) return
+    if (!plannedPath || !plannedPath.segments || plannedPath.segments.length === 0) {
+      source.setData({ type: 'FeatureCollection', features: [] })
+      return
+    }
+    const features = plannedPath.segments.map((seg) => ({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: seg.geometry },
+      properties: {},
+    }))
+    source.setData({ type: 'FeatureCollection', features })
+  }, [plannedPath, mapLoaded])
+
+  // plan-waypoints
+  useEffect(() => {
+    if (!mapLoaded || !map.current) return
+    const source = map.current.getSource('plan-waypoints')
+    if (!source) return
+    const features = planWaypoints.map((wp) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: wp.coords },
+      properties: { id: wp.id },
+    }))
+    source.setData({ type: 'FeatureCollection', features })
+  }, [planWaypoints, mapLoaded])
+
+  // snap-preview
+  useEffect(() => {
+    if (!mapLoaded || !map.current) return
+    const source = map.current.getSource('snap-preview')
+    if (!source) return
+    if (!snapPreview || !snapPreview.coords) {
+      source.setData({ type: 'FeatureCollection', features: [] })
+      return
+    }
+    source.setData({
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: snapPreview.coords }, properties: {} }],
+    })
+  }, [snapPreview, mapLoaded])
+
+// Fly to selected route
   useEffect(() => {
     if (!mapLoaded || !map.current || !selectedRouteId) return
     const route = routes.find((r) => r.id === selectedRouteId)

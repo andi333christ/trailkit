@@ -1,4 +1,10 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useRef } from 'react'
+import { snapToTrail } from './utils/trailSnap.js'
+import { dijkstra } from './utils/trailRouter.js'
+import { useTrailNetwork } from './hooks/useTrailNetwork.js'
+import { computePathElevationProfile } from './utils/elevation.js'
+import { downloadPathGPX } from './utils/export.js'
+import { t } from './i18n/de.js'
 import { Header } from './components/Header.jsx'
 import { Map } from './components/Map.jsx'
 import { FilterBar } from './components/FilterBar.jsx'
@@ -26,8 +32,15 @@ export default function App() {
 
   // Brush mode state
   const [brushMode, setBrushMode] = useState(false)
-  const [brushChain, setBrushChain] = useState([]) // ordered array of route objects
+  const [brushChain, setBrushChain] = useState([])
   const [showAddModal, setShowAddModal] = useState(false)
+
+  // Planner state
+  const [plannerMode, setPlannerMode] = useState(false)
+  const [waypoints, setWaypoints] = useState([])
+  const [plannedPath, setPlannedPath] = useState(null)
+  const [snapPreview, setSnapPreview] = useState(null)
+  const [toast, setToast] = useState(null) // { message, id }
 
   const [filters, setFilters] = useState({
     difficulties: [],
@@ -44,6 +57,7 @@ export default function App() {
   })
 
   const { rides, riddenIds, refresh } = useRides()
+  const { network, edgeBBoxIndex } = useTrailNetwork()
   const { routes, allRoutes, connectivity } = useRoutes(filters, filters.sortBy || 'name')
 
   const selectedRoute = allRoutes.find((r) => r.id === selectedRouteId) || null
@@ -161,8 +175,10 @@ export default function App() {
 
   // ── "Ich will fahren" ────────────────────────────────────────────────────
   function handleSuggestClick() {
-    setBrushMode(true)
-    setBrushChain([])
+    setPlannerMode(true)
+    setWaypoints([])
+    setPlannedPath(null)
+    setSnapPreview(null)
     setHighlightedRouteIds([])
     setView('map')
   }
@@ -171,6 +187,114 @@ export default function App() {
     if (view === 'suggest') {
       setStartPoint([lon, lat])
     }
+  }
+
+  // ── Planner handlers ──────────────────────────────────────────────────────
+  const lastMoveMs = useRef(0)
+
+  function handlePlannerMouseMove([lng, lat]) {
+    const now = Date.now()
+    if (now - lastMoveMs.current < 16) return // ~60fps
+    lastMoveMs.current = now
+    if (!network || !edgeBBoxIndex) return
+    const snap = snapToTrail([lng, lat], network, edgeBBoxIndex)
+    setSnapPreview(snap ? { coords: snap.snappedCoords } : null)
+  }
+
+  function handlePlannerClick([lng, lat]) {
+    if (!network || !edgeBBoxIndex) return
+    const snap = snapToTrail([lng, lat], network, edgeBBoxIndex)
+    if (!snap) {
+      setToast({ message: t('keinWegInDerNaehe'), id: Date.now() })
+      setTimeout(() => setToast(null), 2000)
+      return
+    }
+    const newWp = { id: `wp_${Date.now()}`, nodeId: snap.nodeId, coords: snap.snappedCoords }
+    const newWaypoints = [...waypoints, newWp]
+    setWaypoints(newWaypoints)
+    setSnapPreview(null)
+
+    if (newWaypoints.length >= 2) {
+      const prevWp = newWaypoints[newWaypoints.length - 2]
+      const result = dijkstra(network, edgeBBoxIndex, prevWp.nodeId, snap.nodeId)
+      if (!result) {
+        // No path between these waypoints — still add the waypoint, show warning
+        setToast({ message: t('keineVerbindung'), id: Date.now() })
+        setTimeout(() => setToast(null), 3000)
+        setPlannedPath(null)
+        return
+      }
+      // Merge result into plannedPath
+      const segFromPrev = newWaypoints.length > 2 ? null : plannedPath
+      // Build segments array from edgeIds
+      const segments = result.edgeIds.map((eid) => {
+        const edge = network.edges[eid]
+        return { edgeId: eid, geometry: edge.geometry, source_route_id: edge.source_route_id }
+      })
+      const newPath = {
+        segments: segFromPrev ? [...segFromPrev.segments, ...segments] : segments,
+        totalDistM: (segFromPrev?.totalDistM || 0) + result.distanceM,
+        totalEleGainM: (segFromPrev?.totalEleGainM || 0) + result.eleGainM,
+        totalEleLossM: (segFromPrev?.totalEleLossM || 0) + result.eleLossM,
+      }
+      setPlannedPath(newPath)
+      // Highlight source routes
+      const routeIds = [...new Set(newPath.segments.map((s) => s.source_route_id))]
+      setHighlightedRouteIds(routeIds)
+    }
+  }
+
+  function handleWaypointRemove(id) {
+    const idx = waypoints.findIndex((wp) => wp.id === id)
+    if (idx === -1) return
+    const newWps = waypoints.filter((wp) => wp.id !== id)
+    setWaypoints(newWps)
+    if (newWps.length < 2) {
+      setPlannedPath(null)
+      setHighlightedRouteIds([])
+      return
+    }
+    // Re-route from idx-1 to last waypoint
+    const fromWp = newWps[idx - 1]
+    const toWp = newWps[newWps.length - 1]
+    const result = dijkstra(network, edgeBBoxIndex, fromWp.nodeId, toWp.nodeId)
+    if (!result) {
+      setPlannedPath(null)
+      return
+    }
+    const segments = result.edgeIds.map((eid) => {
+      const edge = network.edges[eid]
+      return { edgeId: eid, geometry: edge.geometry, source_route_id: edge.source_route_id }
+    })
+    const newPath = {
+      segments,
+      totalDistM: result.distanceM,
+      totalEleGainM: result.eleGainM,
+      totalEleLossM: result.eleLossM,
+    }
+    setPlannedPath(newPath)
+    setHighlightedRouteIds([...new Set(newPath.segments.map((s) => s.source_route_id))])
+  }
+
+  function handleWaypointClear() {
+    setWaypoints([])
+    setPlannedPath(null)
+    setSnapPreview(null)
+    setHighlightedRouteIds([])
+  }
+
+  function handlePlannerClose() {
+    setPlannerMode(false)
+    setWaypoints([])
+    setPlannedPath(null)
+    setSnapPreview(null)
+    setHighlightedRouteIds([])
+  }
+
+  function handlePlannerSave() {
+    if (!plannedPath) return
+    const name = `Plan ${new Date().toLocaleDateString('de-AT')}`
+    downloadPathGPX(plannedPath.segments, name)
   }
 
   function handleHighlightRoutes(ids) {
@@ -204,6 +328,12 @@ export default function App() {
             onRouteClick={handleRouteClick}
             onMapClick={handleMapClick}
             startPoint={startPoint}
+            plannerMode={plannerMode}
+            plannedPath={plannedPath}
+            planWaypoints={waypoints}
+            snapPreview={snapPreview}
+            onPlannerClick={handlePlannerClick}
+            onPlannerMouseMove={handlePlannerMouseMove}
           />
 
           {/* Color mode toggle */}
@@ -253,6 +383,40 @@ export default function App() {
             </div>
           )}
 
+          {/* Planner mode banner */}
+          {plannerMode && (
+            <div style={{
+              position: 'absolute', top: 56, left: '50%', transform: 'translateX(-50%)',
+              background: 'var(--accent)',
+              color: 'var(--bg-primary)',
+              padding: '5px 14px',
+              borderRadius: 'var(--radius)',
+              fontSize: 12, fontWeight: 600,
+              zIndex: 15,
+              pointerEvents: 'none',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              {t('wegpunktSetzen')}
+            </div>
+          )}
+
+          {/* Toast notification */}
+          {toast && (
+            <div style={{
+              position: 'absolute', top: 90, left: '50%', transform: 'translateX(-50%)',
+              background: 'var(--bg-primary)',
+              color: 'var(--text)',
+              padding: '6px 14px',
+              borderRadius: 'var(--radius)',
+              fontSize: 12, fontWeight: 500,
+              zIndex: 20,
+              border: '1px solid var(--border)',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            }}>
+              {toast.message}
+            </div>
+          )}
+
           {/* Sidebar */}
           <div style={{
             position: 'absolute', top: 0, left: 0, bottom: 0, width: 320,
@@ -291,7 +455,7 @@ export default function App() {
           />
         )}
 
-        {/* Brush panel */}
+        {/* Brush panel (old chain mode) */}
         {(brushMode || brushChain.length > 0) && (
           <BrushPanel
             chain={brushChain}
@@ -302,6 +466,19 @@ export default function App() {
             onSave={handleBrushSave}
             onAddFromList={handleAddFromList}
             onClose={handleBrushClose}
+          />
+        )}
+
+        {/* Planner panel */}
+        {plannerMode && (
+          <BrushPanel
+            waypoints={waypoints}
+            plannedPath={plannedPath}
+            elevationData={plannedPath ? computePathElevationProfile(plannedPath.segments) : null}
+            onRemoveWaypoint={handleWaypointRemove}
+            onClear={handleWaypointClear}
+            onSave={handlePlannerSave}
+            onClose={handlePlannerClose}
           />
         )}
 

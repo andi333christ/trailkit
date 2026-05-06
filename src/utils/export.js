@@ -130,3 +130,49 @@ export function generateKML(routes, filename = 'trailkit-routes') {
   ]
   return lines.join('\n')
 }
+/**
+ * Generate GPX for a planned path (array of { geometry, source_route_id } segments).
+ */
+export function generatePathGPX(segments, name) {
+  const allCoords = []
+  for (let s = 0; s < segments.length; s++) {
+    const geom = segments[s].geometry
+    if (!geom || geom.length === 0) continue
+    if (s === 0) {
+      allCoords.push(...geom)
+    } else {
+      const first = geom[0]
+      const last = allCoords[allCoords.length - 1]
+      if (last && last[0] === first[0] && last[1] === first[1]) {
+        allCoords.push(...geom.slice(1))
+      } else {
+        allCoords.push(...geom)
+      }
+    }
+  }
+
+  const trkpts = allCoords.map(([lon, lat, ele]) => {
+    if (ele !== null && ele !== undefined) {
+      return `    <trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"><ele>${ele.toFixed(1)}</ele></trkpt>`
+    }
+    return `    <trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"></trkpt>`
+  })
+
+  const lines = [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<gpx version="1.1" creator="TrailKit" xmlns="http://www.topografix.com/GPX/1/1">`,
+    `  <metadata>`,
+    `    <name>${xmlEscape(name)}</name>`,
+    `  </metadata>`,
+    `  <trk>`,
+    `    <name>${xmlEscape(name)}</name>`,
+    ...trkpts,
+    `  </trk>`,
+    `</gpx>`,
+  ]
+  return lines.join('\n')
+}
+
+export function downloadPathGPX(segments, name) {
+  downloadFile(generatePathGPX(segments, name), `${name}.gpx`, 'application/gpx+xml')
+}
