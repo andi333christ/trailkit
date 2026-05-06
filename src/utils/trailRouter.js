@@ -14,6 +14,7 @@
  *            eleGainM: number, eleLossM: number } | null}
  */
 export function dijkstra(trailNetwork, nodeEdgesIndex, fromNodeId, toNodeId) {
+  console.log('[dijkstra] START', { fromNodeId, toNodeId, nodeEdgesIndexSize: nodeEdgesIndex.size })
   const { nodes, edges } = trailNetwork
 
   // Priority queue: [nodeId, distM]
@@ -85,11 +86,13 @@ export function dijkstra(trailNetwork, nodeEdgesIndex, fromNodeId, toNodeId) {
 
   const totalDist = dist.get(toNodeId) ?? 0
 
-  return {
+  const result = {
     edgeIds,
     nodeIds,
     distanceM: totalDist,
     eleGainM: totalGain,
     eleLossM: totalLoss,
   }
+  console.log('[dijkstra] END', result ? `${result.edgeIds.length} edges` : 'NULL')
+  return result
 }
