@@ -238,7 +238,7 @@ export function Map({
       })
 
       map.current.on('click', (e) => {
-        if (plannerMode) {
+        if (plannerModeRef.current) {
           onPlannerClickRef.current?.([e.lngLat.lng, e.lngLat.lat])
         } else {
           onMapClickRef.current?.([e.lngLat.lng, e.lngLat.lat])
@@ -252,9 +252,9 @@ export function Map({
       let hoveredRouteId = null
       let lastPlannerMove = 0
       map.current.on('mousemove', 'routes-simplified', (e) => {
-        if (plannerMode) {
+        if (plannerModeRef.current) {
           const now = Date.now()
-          if (now - lastPlannerMove > 16) { // ~60fps throttle
+          if (now - lastPlannerMove > 16) {
             onPlannerMouseMoveRef.current?.([e.lngLat.lng, e.lngLat.lat])
             lastPlannerMove = now
           }
@@ -271,7 +271,7 @@ export function Map({
         }
       })
       map.current.on('mouseleave', 'routes-simplified', () => {
-        if (plannerMode) {
+        if (plannerModeRef.current) {
           map.current.getCanvas().style.cursor = 'crosshair'
         } else {
           if (hoveredRouteId !== null) {
