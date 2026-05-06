@@ -1,0 +1,399 @@
+import { useEffect, useRef, useState, useCallback } from 'react'
+import maplibregl from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
+
+const TILE_LAYERS = {
+  gelande: {
+    label: 'Gelände',
+    url: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
+    attribution: '© OpenStreetMap contributors, SRTM | OpenTopoMap',
+  },
+  karte: {
+    label: 'Karte',
+    url: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
+    attribution: '© OpenStreetMap contributors © CARTO',
+  },
+  satellit: {
+    label: 'Satellit',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: '© Esri',
+  },
+}
+
+const DIFFICULTY_COLOR = {
+  leicht: '#6b9e78',
+  mittel: '#4a7fc1',
+  schwer: '#c45a3c',
+}
+
+const DEFAULT_CENTER = [16.05, 48.15] // [lon, lat]
+const DEFAULT_ZOOM = 11
+
+export function Map({
+  routes,
+  connectivity,
+  selectedRouteId,
+  highlightedRouteIds = [],
+  colorMode = 'difficulty', // 'difficulty' | 'coverage'
+  riddenIds = new Set(),
+  tileLayer = 'gelande',
+  allRoutes = [],
+  onTileLayerChange,
+  onRouteClick,
+  onMapClick,
+  startPoint,
+  onStartPointSet,
+}) {
+  const mapContainer = useRef(null)
+  const map = useRef(null)
+  const onMapClickRef = useRef(onMapClick)
+  const onRouteClickRef = useRef(onRouteClick)
+  const [mapLoaded, setMapLoaded] = useState(false)
+  const [maplibreSupported, setMaplibreSupported] = useState(true)
+
+  useEffect(() => { onMapClickRef.current = onMapClick }, [onMapClick])
+  useEffect(() => { onRouteClickRef.current = onRouteClick }, [onRouteClick])
+
+  // Init map
+  useEffect(() => {
+    if (map.current || !mapContainer.current) return
+    let cleanup = null
+    try {
+      map.current = new maplibregl.Map({
+        container: mapContainer.current,
+        style: {
+          version: 8,
+          sources: {
+            'osm-tiles': {
+              type: 'raster',
+              tiles: [TILE_LAYERS[tileLayer].url],
+              tileSize: 256,
+              attribution: TILE_LAYERS[tileLayer].attribution,
+            },
+          },
+          layers: [
+            {
+              id: 'osm-tiles-layer',
+              type: 'raster',
+              source: 'osm-tiles',
+              paint: { 'raster-saturation': -0.4, 'raster-brightness-max': 0.9, 'raster-opacity': 0.8 },
+            },
+          ],
+        },
+        center: DEFAULT_CENTER,
+        zoom: DEFAULT_ZOOM,
+        minZoom: 9,
+        maxZoom: 17,
+      })
+
+      map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+      map.current.addControl(new maplibregl.ScaleControl({ maxWidth: 100, unit: 'metric' }), 'bottom-right')
+
+      map.current.on('load', () => {
+        map.current.addSource('routes', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        })
+
+        // White outline layer for selected route (rendered below colored)
+        map.current.addLayer({
+          id: 'routes-selected-outline',
+          type: 'line',
+          source: 'routes',
+          filter: ['boolean', ['get', 'selected'], false],
+          paint: {
+            'line-color': '#ffffff',
+            'line-width': ['interpolate', ['linear'], ['zoom'], 9, 10, 15, 18],
+            'line-opacity': 0.7,
+          },
+        })
+
+        // All routes (colored, on top of outline)
+        map.current.addLayer({
+          id: 'routes-simplified',
+          type: 'line',
+          source: 'routes',
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': [
+              'interpolate', ['linear'], ['zoom'],
+              9, ['case', ['get', 'highlighted'], 6, 4],
+              15, ['case', ['get', 'highlighted'], 14, 10],
+            ],
+            'line-opacity': ['case', ['get', 'dimmed'], 0.35, 1.0],
+          },
+        })
+
+        map.current.addLayer({
+          id: 'routes-hover',
+          type: 'line',
+          source: 'routes',
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 8,
+            'line-opacity': 0,
+          },
+        })
+
+        map.current.addSource('start-point', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        })
+
+        map.current.addLayer({
+          id: 'start-point-circle',
+          type: 'circle',
+          source: 'start-point',
+          paint: {
+            'circle-radius': 8,
+            'circle-color': '#d4a853',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#fff',
+          },
+        })
+
+        setMapLoaded(true)
+
+        // Fit all routes on initial load so nothing is cut off
+        if (allRoutes && allRoutes.length > 0) {
+          const lons = []
+          const lats = []
+          for (const r of allRoutes) {
+            if (r.bbox) {
+              lons.push(r.bbox[0], r.bbox[2])
+              lats.push(r.bbox[1], r.bbox[3])
+            }
+          }
+          if (lons.length > 0) {
+            map.current.fitBounds(
+              [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+              { padding: { top: 80, bottom: 80, left: 400, right: 80 }, maxZoom: 12, duration: 0 }
+            )
+          }
+        }
+      })
+
+      map.current.on('click', (e) => {
+        onMapClickRef.current?.([e.lngLat.lng, e.lngLat.lat])
+      })
+
+      map.current.on('route-click', (e) => {
+        onRouteClickRef.current?.(e.routeId)
+      })
+
+      let hoveredRouteId = null
+      map.current.on('mousemove', 'routes-simplified', (e) => {
+        if (e.features.length > 0) {
+          if (hoveredRouteId !== null) {
+            map.current.setFeatureState({ source: 'routes', id: hoveredRouteId }, { hovered: false })
+          }
+          hoveredRouteId = e.features[0].id
+          map.current.setFeatureState({ source: 'routes', id: hoveredRouteId }, { hovered: true })
+          map.current.getCanvas().style.cursor = 'pointer'
+        }
+      })
+      map.current.on('mouseleave', 'routes-simplified', () => {
+        if (hoveredRouteId !== null) {
+          map.current.setFeatureState({ source: 'routes', id: hoveredRouteId }, { hovered: false })
+        }
+        hoveredRouteId = null
+        map.current.getCanvas().style.cursor = ''
+      })
+
+      cleanup = () => {
+        if (map.current) {
+          map.current.remove()
+          map.current = null
+        }
+      }
+    } catch (err) {
+      console.error('MapLibre init failed:', err)
+      setMaplibreSupported(false)
+      map.current = null
+    }
+    return cleanup
+  }, [])
+
+  // Update tile layer
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return
+    const layer = TILE_LAYERS[tileLayer]
+    const source = map.current.getSource('osm-tiles')
+    if (source) {
+      source.setTiles([layer.url])
+      map.current.setPaintProperty('osm-tiles-layer', 'raster-saturation', tileLayer === 'satellit' ? -0.6 : -0.4)
+    }
+  }, [tileLayer, mapLoaded])
+
+  // Build GeoJSON features
+  useEffect(() => {
+    if (!mapLoaded || !map.current) return
+
+    const features = routes
+      .filter((r) => r.geometry || r.geometry_simplified)
+      .map((r) => {
+        const geom = r.geometry_simplified || r.geometry
+        const isRidden = riddenIds.has(r.id)
+        const isSelected = r.id === selectedRouteId
+        const isHighlighted = highlightedRouteIds.includes(r.id)
+        const isDimmed = highlightedRouteIds.length > 0 && !isHighlighted
+
+        let color
+        if (colorMode === 'coverage') {
+          color = isRidden ? '#e8e6e1' : '#4a4a44'
+        } else {
+          color = DIFFICULTY_COLOR[r.difficulty] || '#c4943d'
+        }
+
+        // Verbindungsweg and Zubringer always render in accent yellow
+        if (r.id.includes('verbindungsweg') || r.id.includes('zubringer')) {
+          color = '#9a9890'
+        }
+
+        return {
+          type: 'Feature',
+          id: r.id,
+          geometry: geom,
+          properties: {
+            id: r.id,
+            color: color,
+            highlighted: isHighlighted,
+            dimmed: isDimmed,
+            selected: isSelected,
+            title: r.title,
+          },
+        }
+      })
+
+    const source = map.current.getSource('routes')
+    if (source) {
+      source.setData({ type: 'FeatureCollection', features })
+    }
+
+    // Click handler on source
+    if (features.length > 0) {
+      map.current.off('click', handleRouteClick)
+      map.current.on('click', 'routes-simplified', handleRouteClick)
+    }
+  }, [routes, colorMode, riddenIds, selectedRouteId, highlightedRouteIds, mapLoaded])
+
+  function handleRouteClick(e) {
+    const feature = e.features?.[0]
+    if (feature) onRouteClickRef.current?.(feature.properties.id)
+  }
+
+  // Start point marker
+  useEffect(() => {
+    if (!mapLoaded || !map.current) return
+    const source = map.current.getSource('start-point')
+    if (!source) return
+
+    if (startPoint) {
+      source.setData({
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: startPoint } }],
+      })
+    } else {
+      source.setData({ type: 'FeatureCollection', features: [] })
+    }
+  }, [startPoint, mapLoaded])
+
+  // Fly to selected route
+  useEffect(() => {
+    if (!mapLoaded || !map.current || !selectedRouteId) return
+    const route = routes.find((r) => r.id === selectedRouteId)
+    if (route?.bbox) {
+      map.current.fitBounds(
+        [[route.bbox[0], route.bbox[1]], [route.bbox[2], route.bbox[3]]],
+        { padding: { top: 80, bottom: 80, left: 400, right: 80 }, maxZoom: 15, duration: 600 }
+      )
+    }
+  }, [selectedRouteId, mapLoaded])
+
+  // Fly to highlighted chain
+  useEffect(() => {
+    if (!mapLoaded || !map.current || highlightedRouteIds.length === 0) return
+    const bounds = routes
+      .filter((r) => highlightedRouteIds.includes(r.id) && r.bbox)
+      .flatMap((r) => [[r.bbox[0], r.bbox[1]], [r.bbox[2], r.bbox[3]]])
+    if (bounds.length > 0) {
+      map.current.fitBounds(bounds, { padding: { top: 80, bottom: 80, left: 400, right: 80 }, maxZoom: 14, duration: 800 })
+    }
+  }, [highlightedRouteIds, mapLoaded])
+
+  if (!maplibreSupported) {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
+        <p>MapLibre GL wird von deinem Browser nicht unterstützt.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
+
+      {/* Tile layer switcher */}
+      <div style={{
+        position: 'absolute', top: 8, right: 8,
+        display: 'flex', flexDirection: 'column', gap: 4,
+        background: 'var(--map-control-bg)',
+        backdropFilter: 'blur(8px)',
+        borderRadius: 'var(--radius)',
+        border: '1px solid var(--border)',
+        padding: 4,
+        zIndex: 10,
+      }}>
+        {Object.entries(TILE_LAYERS).map(([key, layer]) => (
+          <button
+            key={key}
+            onClick={() => onTileLayerChange?.(key)}
+            style={{
+              padding: '4px 10px',
+              fontSize: 11,
+              fontWeight: 500,
+              borderRadius: 3,
+              background: tileLayer === key ? 'var(--accent)' : 'transparent',
+              color: tileLayer === key ? 'var(--bg-primary)' : 'var(--text-secondary)',
+              transition: 'all 0.15s',
+              textAlign: 'left',
+            }}
+          >
+            {layer.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Color mode toggle */}
+      <div style={{
+        position: 'absolute', top: 8, left: 8,
+        display: 'flex', gap: 4,
+        background: 'var(--map-control-bg)',
+        backdropFilter: 'blur(8px)',
+        borderRadius: 'var(--radius)',
+        border: '1px solid var(--border)',
+        padding: 4,
+        zIndex: 10,
+      }}>
+        {['difficulty', 'coverage'].map((mode) => (
+          <button
+            key={mode}
+            onClick={() => {/* handled in App */}}
+            data-mode={mode}
+            style={{
+              padding: '4px 10px',
+              fontSize: 11,
+              fontWeight: 500,
+              borderRadius: 3,
+              background: colorMode === mode ? 'var(--accent)' : 'transparent',
+              color: colorMode === mode ? 'var(--bg-primary)' : 'var(--text-secondary)',
+              transition: 'all 0.15s',
+            }}
+          >
+            {mode === 'difficulty' ? 'Schwierigkeit' : 'Entdeckt'}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
