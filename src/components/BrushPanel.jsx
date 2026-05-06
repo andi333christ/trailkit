@@ -21,16 +21,22 @@ export function BrushPanel({
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [showHints, setShowHints] = useState(true)
+  const isPlanner = waypoints !== undefined
 
-  const totalKm = chain.reduce((s, r) => s + (r.distance_km || 0), 0)
-  const totalHm = chain.reduce((s, r) => s + (r.elevation_gain_m || 0), 0)
-  const chainName = chain.map((r) => r.title).join(' → ')
+  const totalKm = chain ? chain.reduce((s, r) => s + (r.distance_km || 0), 0) : 0
+  const totalHm = chain ? chain.reduce((s, r) => s + (r.elevation_gain_m || 0), 0) : 0
+  const chainName = chain ? chain.map((r) => r.title).join(' → ') : ''
 
   function handleExport() {
-    downloadChainGPX(chain, chainName)
+    if (isPlanner) {
+      // handled via onPlannerSave
+      return
+    }
+    downloadChainGPX(chain || [], chainName)
   }
 
   async function handleSave() {
+    if (isPlanner) return
     setSaving(true)
     await onSave(chain.map((r) => r.id), chainName)
     setSaving(false)

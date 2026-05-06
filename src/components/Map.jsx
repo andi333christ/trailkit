@@ -172,12 +172,14 @@ export function Map({
           id: 'plan-path-line',
           type: 'line',
           source: 'plan-path',
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round',
+          },
           paint: {
             'line-color': '#d4a853',
             'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5, 15, 9],
             'line-opacity': 0.9,
-            'line-cap': 'round',
-            'line-join': 'round',
           },
         })
 
