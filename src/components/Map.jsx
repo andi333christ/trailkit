@@ -64,6 +64,8 @@ export function Map({
   const onPlannerMouseMoveRef = useRef(onPlannerMouseMove)
   useEffect(() => { onPlannerClickRef.current = onPlannerClick }, [onPlannerClick])
   useEffect(() => { onPlannerMouseMoveRef.current = onPlannerMouseMove }, [onPlannerMouseMove])
+  const plannerModeRef = useRef(plannerMode)
+  useEffect(() => { plannerModeRef.current = plannerMode }, [plannerMode])
 
   // Init map
   useEffect(() => {
@@ -238,6 +240,12 @@ export function Map({
       })
 
       map.current.on('click', (e) => {
+        console.log('[Map] click', {
+          plannerMode: plannerModeRef.current,
+          hasOnPlanner: !!onPlannerClickRef.current,
+          hasOnMap: !!onMapClickRef.current,
+          coords: [e.lngLat.lng, e.lngLat.lat]
+        })
         if (plannerModeRef.current) {
           onPlannerClickRef.current?.([e.lngLat.lng, e.lngLat.lat])
         } else {
