@@ -48,7 +48,7 @@ export function FilterBar({ filters, onChange, totalCount, filteredCount }) {
       overflow: 'hidden',
     }}>
       {/* Search row */}
-      <div style={{ padding: 'var(--sp-1) var(--sp-2)', display: 'flex', gap: 8, alignItems: 'center' }}>
+      <div style={{ padding: 'var(--sp-1) var(--sp-2) 0', display: 'flex', gap: 8, alignItems: 'center' }}>
         <input
           type="text"
           placeholder={t('searchPlaceholder')}
@@ -56,21 +56,24 @@ export function FilterBar({ filters, onChange, totalCount, filteredCount }) {
           onChange={(e) => setFilter('search', e.target.value)}
           style={{ flex: 1, height: 32 }}
         />
-        <span className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
-          {filteredCount}/{totalCount}
-        </span>
+      </div>
+      {/* Filter button row */}
+      <div style={{ padding: '4px var(--sp-2) var(--sp-1)', display: 'flex', gap: 6, alignItems: 'center' }}>
         <button
           className="btn-ghost"
           onClick={() => setExpanded(!expanded)}
-          style={{ fontSize: 11, padding: '4px 8px' }}
+          style={{ fontSize: 11, padding: '3px 8px' }}
         >
           {t('filter')} {expanded ? '▲' : '▼'}
         </button>
         {hasActiveFilters && (
-          <button className="btn-ghost" onClick={clearAll} style={{ fontSize: 11, padding: '4px 8px', color: 'var(--accent)' }}>
+          <button className="btn-ghost" onClick={clearAll} style={{ fontSize: 11, padding: '3px 8px', color: 'var(--accent)' }}>
             {t('clearAll')}
           </button>
         )}
+        <span className="mono" style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
+          {filteredCount}/{totalCount}
+        </span>
       </div>
 
       {/* Expanded filters */}
