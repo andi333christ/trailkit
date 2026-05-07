@@ -15,32 +15,37 @@ function geomDist(geometry) {
  * Dijkstra shortest-path.
  * nodeEdgesIndex must be a Map<nodeId, edgeId[]>.
  */
+// Uphill traversal of a one-way (downhill-only) trail edge is penalised but
+// not blocked. This avoids extreme detours when waypoints land in awkward
+// positions while still strongly preferring the correct downhill direction.
+const UPHILL_TRAIL_PENALTY = 5
+
 export function dijkstra(trailNetwork, nodeEdgesIndex, fromNodeId, toNodeId) {
   const { nodes, edges } = trailNetwork
 
-  const pq = [[fromNodeId, 0]]
-  const dist = new Map()
+  const pq = [[fromNodeId, 0]]   // [nodeId, routingCost]
+  const costMap = new Map()      // routing cost (includes penalties)
   const prev = new Map()
-  dist.set(fromNodeId, 0)
+  costMap.set(fromNodeId, 0)
 
   while (pq.length > 0) {
     pq.sort((a, b) => a[1] - b[1])
-    const [currId, currDist] = pq.shift()
+    const [currId, currCost] = pq.shift()
 
     if (currId === toNodeId) break
-    if (currDist > (dist.get(currId) ?? Infinity)) continue
+    if (currCost > (costMap.get(currId) ?? Infinity)) continue
 
     for (const eid of (nodeEdgesIndex.get(currId) || [])) {
       const edge = edges[eid]
       if (!edge) continue
-      // One-way trail edges: only traversable in the recorded (downhill) from→to direction
-      if (edge.one_way && edge.from !== currId) continue
+      const goingUpTrail = edge.one_way && edge.from !== currId
+      const edgeCost = (edge.distance_m || 0) * (goingUpTrail ? UPHILL_TRAIL_PENALTY : 1)
       const neighbor = edge.from === currId ? edge.to : edge.from
-      const newDist = currDist + (edge.distance_m || 0)
-      if (newDist < (dist.get(neighbor) ?? Infinity)) {
-        dist.set(neighbor, newDist)
+      const newCost = currCost + edgeCost
+      if (newCost < (costMap.get(neighbor) ?? Infinity)) {
+        costMap.set(neighbor, newCost)
         prev.set(neighbor, { edgeId: eid, nodeId: currId })
-        pq.push([neighbor, newDist])
+        pq.push([neighbor, newCost])
       }
     }
   }
@@ -58,13 +63,15 @@ export function dijkstra(trailNetwork, nodeEdgesIndex, fromNodeId, toNodeId) {
   }
   nodeIds.push(toNodeId)
 
-  let totalGain = 0, totalLoss = 0
+  // Compute actual distance and elevation from the chosen path (not routing cost)
+  let distanceM = 0, totalGain = 0, totalLoss = 0
   for (const eid of edgeIds) {
-    totalGain += edges[eid]?.ele_gain_m || 0
-    totalLoss += edges[eid]?.ele_loss_m || 0
+    distanceM += edges[eid]?.distance_m || 0
+    totalGain  += edges[eid]?.ele_gain_m || 0
+    totalLoss  += edges[eid]?.ele_loss_m || 0
   }
 
-  return { edgeIds, nodeIds, distanceM: dist.get(toNodeId) ?? 0, eleGainM: totalGain, eleLossM: totalLoss }
+  return { edgeIds, nodeIds, distanceM, eleGainM: totalGain, eleLossM: totalLoss }
 }
 
 /**
