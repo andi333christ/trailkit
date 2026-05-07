@@ -29,6 +29,20 @@ OUTPUT_DIR = Path(__file__).parent.parent / "src" / "data"
 ROUTES_DIR = DATA_DIR / "routes"
 GPX_DIR    = DATA_DIR / "gpx-enriched"
 
+# Slugs containing any of these keywords (and not in the exclusion set) are
+# treated as one-way downhill trails — recorded in riding (descending) direction.
+_TRAIL_KEYWORDS   = frozenset(['trail', 'flow', 'fun', 'blackberry', 'raspberry', 'enduro'])
+_EXCLUDE_PREFIXES = ('verbindungsweg-', 'zubringer-', '_')
+_UPHILL_KEYWORDS  = frozenset(['uphill', 'auffahrt'])
+
+def is_downhill_trail(slug: str) -> bool:
+    if any(slug.startswith(p) for p in _EXCLUDE_PREFIXES):
+        return False
+    if any(k in slug for k in _UPHILL_KEYWORDS):
+        return False
+    return any(k in slug for k in _TRAIL_KEYWORDS)
+
+
 GRID_DEG             = 0.001   # spatial index cell ≈ 80 m at 48°N
 JUNCTION_THRESHOLD_M = 60      # max distance for two routes to be "connected"
 NODE_DEDUP_M         = 25      # merge nodes within this radius
@@ -428,6 +442,7 @@ def main():
                         frac = seg_dist / route_dist if route_dist > 0 else 0
                         gain = routes_meta[slug]['elevation_gain_m'] * frac
                         loss = routes_meta[slug]['elevation_loss_m'] * frac
+                        trail_edge = is_downhill_trail(slug)
                         edges[eid] = {
                             'from':            current_from,
                             'to':              nid,
@@ -437,6 +452,8 @@ def main():
                             'bidirectional':   is_loop,
                             'ele_gain_m':      int(gain),
                             'ele_loss_m':      int(loss),
+                            'one_way':         trail_edge,
+                            'trail_edge':      trail_edge,
                         }
                         route_edges.append(eid)
                         total_km += seg_dist / 1000.0
@@ -594,6 +611,24 @@ def main():
         encoding='utf-8'
     )
     print(f"\n  → {out}  ({out.stat().st_size/1024/1024:.1f} MB)")
+
+    # 12. Write trail_edges.geojson for map directional-arrow visualization
+    trail_features = [
+        {
+            'type': 'Feature',
+            'geometry': {'type': 'LineString', 'coordinates': ed['geometry']},
+            'properties': {'source_route_id': ed['source_route_id']},
+        }
+        for ed in edges.values()
+        if ed.get('trail_edge')
+    ]
+    trail_out = OUTPUT_DIR / "trail_edges.json"
+    trail_out.write_text(
+        json.dumps({'type': 'FeatureCollection', 'features': trail_features},
+                   ensure_ascii=False),
+        encoding='utf-8'
+    )
+    print(f"  → {trail_out}  ({len(trail_features)} trail edges)")
     print("=== Done ===")
 
 

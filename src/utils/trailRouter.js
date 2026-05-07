@@ -33,6 +33,8 @@ export function dijkstra(trailNetwork, nodeEdgesIndex, fromNodeId, toNodeId) {
     for (const eid of (nodeEdgesIndex.get(currId) || [])) {
       const edge = edges[eid]
       if (!edge) continue
+      // One-way trail edges: only traversable in the recorded (downhill) from→to direction
+      if (edge.one_way && edge.from !== currId) continue
       const neighbor = edge.from === currId ? edge.to : edge.from
       const newDist = currDist + (edge.distance_m || 0)
       if (newDist < (dist.get(neighbor) ?? Infinity)) {
@@ -138,12 +140,14 @@ function routeSinglePair(network, nodeEdgesIndex, snap1, snap2) {
       source_route_id: edge.source_route_id,
       ele_gain_m: Math.round((edge.ele_gain_m || 0) * fracA),
       ele_loss_m: Math.round((edge.ele_loss_m || 0) * fracA),
+      one_way: edge.one_way || false,
     }
     augEdges[ebId] = {
       from: vnId, to: edge.to, geometry: geomB, distance_m: distB,
       source_route_id: edge.source_route_id,
       ele_gain_m: Math.round((edge.ele_gain_m || 0) * (1 - fracA)),
       ele_loss_m: Math.round((edge.ele_loss_m || 0) * (1 - fracA)),
+      one_way: edge.one_way || false,
     }
 
     delete augEdges[snap.edgeId]

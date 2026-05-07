@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import trailEdgesData from '../data/trail_edges.json'
 
 const TILE_LAYERS = {
   gelande: {
@@ -224,6 +225,32 @@ export function Map({
           },
         })
 
+
+        // Trail edges — directional arrows showing downhill riding direction
+        map.current.addSource('trail-edges', {
+          type: 'geojson',
+          data: trailEdgesData,
+        })
+        map.current.addLayer({
+          id: 'trail-arrows',
+          type: 'symbol',
+          source: 'trail-edges',
+          minzoom: 13,
+          layout: {
+            'symbol-placement': 'line',
+            'symbol-spacing': 48,
+            'text-field': '▶',
+            'text-size': 10,
+            'text-rotation-alignment': 'map',
+            'text-keep-upright': false,
+            'text-allow-overlap': false,
+          },
+          paint: {
+            'text-color': 'rgba(255, 255, 255, 0.9)',
+            'text-halo-color': 'rgba(0, 0, 0, 0.45)',
+            'text-halo-width': 1.5,
+          },
+        })
 
         // Terrain DEM source (AWS Terrain Tiles, terrarium encoding, free/no-key)
         map.current.addSource('terrain-dem', {
