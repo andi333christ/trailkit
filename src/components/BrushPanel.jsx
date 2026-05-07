@@ -102,21 +102,19 @@ export function BrushPanel({
                   onDragOver={(e) => {
                     e.preventDefault()
                     e.dataTransfer.dropEffect = 'move'
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    const mid = rect.top + rect.height / 2
-                    setDropIdx(e.clientY < mid ? i : i + 1)
+                    const from = dragIdxRef.current
+                    if (from === null || from === i) { setDropIdx(null); return }
+                    // direction-based: dragging down = insert after, dragging up = insert before
+                    setDropIdx(from < i ? i + 1 : i)
                   }}
                   onDrop={(e) => {
                     e.preventDefault()
                     const from = dragIdxRef.current
-                    if (from === null) return
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    const to = e.clientY < rect.top + rect.height / 2 ? i : i + 1
                     dragIdxRef.current = null
                     setDropIdx(null)
-                    if (from !== to && from !== to - 1) {
-                      onReorderWaypoints?.(from, to > from ? to - 1 : to)
-                    }
+                    if (from === null || from === i) return
+                    const to = from < i ? i + 1 : i
+                    onReorderWaypoints?.(from, to > from ? to - 1 : to)
                   }}
                 >
                   {/* Drag handle */}
