@@ -49,6 +49,7 @@ export function Map({
   plannedPath = null,
   planWaypoints = [],
   snapPreview = null,
+  hoveredRouteId,
   onPlannerClick,
   onPlannerMouseMove,
   onWaypointDrag,
@@ -475,6 +476,19 @@ export function Map({
       waypointMarkersRef.current.push(marker)
     })
   }, [planWaypoints, mapLoaded])
+
+  // Sync list-hover → map feature state
+  const prevListHoveredRef = useRef(null)
+  useEffect(() => {
+    if (!mapLoaded || !map.current) return
+    if (prevListHoveredRef.current) {
+      map.current.setFeatureState({ source: 'routes', id: prevListHoveredRef.current }, { hovered: false })
+    }
+    if (hoveredRouteId) {
+      map.current.setFeatureState({ source: 'routes', id: hoveredRouteId }, { hovered: true })
+    }
+    prevListHoveredRef.current = hoveredRouteId
+  }, [hoveredRouteId, mapLoaded])
 
   // snap-preview
   useEffect(() => {

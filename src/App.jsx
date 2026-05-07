@@ -348,6 +348,7 @@ export default function App() {
             onTileLayerChange={setTileLayer}
             onRouteClick={handleRouteClick}
             onRouteHover={setHoveredRouteId}
+            hoveredRouteId={hoveredRouteId}
             onMapClick={handleMapClick}
             startPoint={startPoint}
             plannerMode={plannerMode}
@@ -463,6 +464,7 @@ export default function App() {
               selectedRouteId={selectedRouteId}
               hoveredRouteId={hoveredRouteId}
               onRouteClick={handleRouteClick}
+              onRouteHover={setHoveredRouteId}
             />
           </div>
         </div>

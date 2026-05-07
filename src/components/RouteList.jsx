@@ -1,7 +1,7 @@
 import { useEffect, useRef, forwardRef } from 'react'
 import { t } from '../i18n/de.js'
 
-export function RouteList({ routes, riddenIds, selectedRouteId, hoveredRouteId, onRouteClick }) {
+export function RouteList({ routes, riddenIds, selectedRouteId, hoveredRouteId, onRouteClick, onRouteHover }) {
   const listRef = useRef(null)
   const selectedCardRef = useRef(null)
   const hoveredCardRef = useRef(null)
@@ -41,6 +41,8 @@ export function RouteList({ routes, riddenIds, selectedRouteId, hoveredRouteId, 
             isSelected={isSelected}
             isHovered={isHovered}
             onClick={() => onRouteClick(route.id)}
+            onMouseEnter={() => onRouteHover?.(route.id)}
+            onMouseLeave={() => onRouteHover?.(null)}
           />
         )
       })}
@@ -48,7 +50,7 @@ export function RouteList({ routes, riddenIds, selectedRouteId, hoveredRouteId, 
   )
 }
 
-export const RouteCard = forwardRef(function RouteCard({ route, isRidden, isSelected, isHovered, onClick }, ref) {
+export const RouteCard = forwardRef(function RouteCard({ route, isRidden, isSelected, isHovered, onClick, onMouseEnter, onMouseLeave }, ref) {
   const badgeClass = `badge badge-${route.difficulty}`
   const active = isSelected || isHovered
 
@@ -56,6 +58,8 @@ export const RouteCard = forwardRef(function RouteCard({ route, isRidden, isSele
     <button
       ref={ref}
       onClick={onClick}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       style={{
         display: 'block',
         width: '100%',
