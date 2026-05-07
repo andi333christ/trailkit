@@ -440,9 +440,16 @@ export function Map({
     waypointMarkersRef.current.forEach((m) => m.remove())
     waypointMarkersRef.current = []
     planWaypoints.forEach((wp, i) => {
+      // Outer el: MapLibre owns its transform for positioning — don't touch it
       const el = document.createElement('div')
-      Object.assign(el.style, {
-        width: '24px', height: '24px', borderRadius: '50%',
+      Object.assign(el.style, { width: '24px', height: '24px' })
+      el.setAttribute('draggable', 'false')
+      el.addEventListener('dragstart', (e) => e.preventDefault())
+
+      // Inner circle: safe to apply scale/cursor without conflicting with MapLibre
+      const inner = document.createElement('div')
+      Object.assign(inner.style, {
+        width: '100%', height: '100%', borderRadius: '50%',
         background: '#b86040', border: '2.5px solid #f2ece0',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: '#f2ece0', fontWeight: '700', fontSize: '11px',
@@ -451,14 +458,17 @@ export function Map({
         cursor: 'grab', userSelect: 'none',
         transition: 'transform 0.1s',
       })
-      el.textContent = String(i + 1)
+      inner.textContent = String(i + 1)
+      el.appendChild(inner)
+
       const marker = new maplibregl.Marker({ element: el, anchor: 'center', draggable: true })
         .setLngLat(wp.coords)
         .addTo(map.current)
-      el.addEventListener('mousedown', () => { el.style.cursor = 'grabbing'; el.style.transform = 'scale(1.2)' })
+      el.addEventListener('mousedown', () => { inner.style.cursor = 'grabbing'; inner.style.transform = 'scale(1.2)' })
+      el.addEventListener('mouseup', () => { inner.style.cursor = 'grab'; inner.style.transform = '' })
       marker.on('dragend', () => {
-        el.style.cursor = 'grab'
-        el.style.transform = ''
+        inner.style.cursor = 'grab'
+        inner.style.transform = ''
         const { lng, lat } = marker.getLngLat()
         onWaypointDragRef.current?.(wp.id, [lng, lat])
       })

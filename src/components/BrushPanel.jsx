@@ -109,10 +109,12 @@ export function BrushPanel({
                   onDrop={(e) => {
                     e.preventDefault()
                     const from = dragIdxRef.current
-                    const to = dropIdx ?? i
+                    if (from === null) return
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const to = e.clientY < rect.top + rect.height / 2 ? i : i + 1
                     dragIdxRef.current = null
                     setDropIdx(null)
-                    if (from !== null && from !== to && from !== to - 1) {
+                    if (from !== to && from !== to - 1) {
                       onReorderWaypoints?.(from, to > from ? to - 1 : to)
                     }
                   }}
