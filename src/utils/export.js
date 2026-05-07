@@ -166,7 +166,9 @@ export function generatePathGPX(segments, name) {
     `  </metadata>`,
     `  <trk>`,
     `    <name>${xmlEscape(name)}</name>`,
+    `    <trkseg>`,
     ...trkpts,
+    `    </trkseg>`,
     `  </trk>`,
     `</gpx>`,
   ]

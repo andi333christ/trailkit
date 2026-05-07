@@ -1,12 +1,12 @@
 import { useState, useCallback, useMemo, useRef } from 'react'
 import { snapToTrail } from './utils/trailSnap.js'
-import { dijkstra } from './utils/trailRouter.js'
+import { routeWithVirtualNodes } from './utils/trailRouter.js'
 import { useTrailNetwork } from './hooks/useTrailNetwork.js'
 import { computePathElevationProfile } from './utils/elevation.js'
 import { downloadPathGPX } from './utils/export.js'
 import { t } from './i18n/de.js'
 import { Header } from './components/Header.jsx'
-import { Map } from './components/Map.jsx'
+import { Map as MapView } from './components/Map.jsx'
 import { FilterBar } from './components/FilterBar.jsx'
 import { RouteList } from './components/RouteList.jsx'
 import { RouteDetail } from './components/RouteDetail.jsx'
@@ -24,6 +24,7 @@ import './styles/tokens.css'
 
 export default function App() {
   const [selectedRouteId, setSelectedRouteId] = useState(null)
+  const [hoveredRouteId, setHoveredRouteId] = useState(null)
   const [highlightedRouteIds, setHighlightedRouteIds] = useState([])
   const [colorMode, setColorMode] = useState('difficulty')
   const [tileLayer, setTileLayer] = useState('satellit')
@@ -192,6 +193,16 @@ export default function App() {
   // ── Planner handlers ──────────────────────────────────────────────────────
   const lastMoveMs = useRef(0)
 
+  function buildSegments({ edgeIds, nodeIds, augEdges }) {
+    return edgeIds.map((eid, i) => {
+      const edge = augEdges[eid]
+      if (!edge) return null
+      const reversed = nodeIds[i] !== edge.from
+      const geometry = reversed ? [...edge.geometry].reverse() : edge.geometry
+      return { edgeId: eid, geometry, source_route_id: edge.source_route_id, ele_gain_m: edge.ele_gain_m || 0, ele_loss_m: edge.ele_loss_m || 0 }
+    }).filter(Boolean)
+  }
+
   function handlePlannerMouseMove([lng, lat]) {
     const now = Date.now()
     if (now - lastMoveMs.current < 16) return // ~60fps
@@ -202,72 +213,37 @@ export default function App() {
   }
 
   function handlePlannerClick([lng, lat]) {
-    if (!network || !edgeBBoxIndex) {
-      console.log('[App] handlePlannerClick: network or edgeBBoxIndex not ready', { network: !!network, edgeBBoxIndex: !!edgeBBoxIndex })
-      return
-    }
+    if (!network || !edgeBBoxIndex) return
     const snap = snapToTrail([lng, lat], network, edgeBBoxIndex)
     if (!snap) {
-      console.log('[App] handlePlannerClick: snap returned null', [lng, lat])
       setToast({ message: t('keinWegInDerNaehe'), id: Date.now() })
       setTimeout(() => setToast(null), 2000)
       return
     }
-    const newWp = { id: `wp_${Date.now()}`, nodeId: snap.nodeId, coords: snap.snappedCoords }
+    const newWp = { id: `wp_${Date.now()}`, snap, coords: snap.snappedCoords }
     const newWaypoints = [...waypoints, newWp]
     setWaypoints(newWaypoints)
     setSnapPreview(null)
-    console.log('[App] waypoints:', newWaypoints.length, '| snap:', snap.nodeId)
 
     if (newWaypoints.length >= 2) {
       const prevWp = newWaypoints[newWaypoints.length - 2]
       const nodeEdgesIdx = new Map(Object.entries(network.node_edges || {}))
-      // dijkstra runs in a deferred callback to avoid hook issues
-      setTimeout(() => {
-        const result = dijkstra(network, nodeEdgesIdx, prevWp.nodeId, snap.nodeId)
-        console.log('[App] dijkstra result:', result ? `${result.edgeIds.length} edges, ${result.distanceM}m` : 'NULL')
-        if (!result) {
-          setToast({ message: t('keineVerbindung'), id: Date.now() })
-          setTimeout(() => setToast(null), 3000)
-          setPlannedPath(null)
-          return
-        }
-        const segments = result.edgeIds.map((eid) => {
-          const edge = network.edges[eid]
-          return { edgeId: eid, geometry: edge.geometry, source_route_id: edge.source_route_id }
-        })
-        setPlannedPath({
-          segments,
-          totalDistM: result.distanceM,
-          totalEleGainM: result.eleGainM,
-          totalEleLossM: result.eleLossM,
-        })
-        setHighlightedRouteIds([...new Set(segments.map((s) => s.source_route_id))])
-      }, 0)
-      return
-        // No path between these waypoints — still add the waypoint, show warning
+      const routed = routeWithVirtualNodes(network, nodeEdgesIdx, prevWp.snap, snap)
+      if (!routed) {
         setToast({ message: t('keineVerbindung'), id: Date.now() })
         setTimeout(() => setToast(null), 3000)
         setPlannedPath(null)
         return
       }
-      // Merge result into plannedPath
-      const segFromPrev = newWaypoints.length > 2 ? null : plannedPath
-      // Build segments array from edgeIds
-      const segments = result.edgeIds.map((eid) => {
-        const edge = network.edges[eid]
-        return { edgeId: eid, geometry: edge.geometry, source_route_id: edge.source_route_id }
-      })
+      const segFromPrev = newWaypoints.length > 2 ? plannedPath : null
+      const segments = buildSegments(routed)
       const newPath = {
         segments: segFromPrev ? [...segFromPrev.segments, ...segments] : segments,
-        totalDistM: (segFromPrev?.totalDistM || 0) + result.distanceM,
-        totalEleGainM: (segFromPrev?.totalEleGainM || 0) + result.eleGainM,
-        totalEleLossM: (segFromPrev?.totalEleLossM || 0) + result.eleLossM,
+        totalDistM: (segFromPrev?.totalDistM || 0) + routed.distanceM,
+        totalEleGainM: (segFromPrev?.totalEleGainM || 0) + routed.eleGainM,
+        totalEleLossM: (segFromPrev?.totalEleLossM || 0) + routed.eleLossM,
       }
       setPlannedPath(newPath)
-      // Highlight source routes
-      const routeIds = [...new Set(newPath.segments.map((s) => s.source_route_id))]
-      setHighlightedRouteIds(routeIds)
     }
   }
 
@@ -281,27 +257,26 @@ export default function App() {
       setHighlightedRouteIds([])
       return
     }
-    // Re-route from idx-1 to last waypoint
-    const fromWp = newWps[idx - 1]
-    const toWp = newWps[newWps.length - 1]
+    // Rebuild entire path from all remaining waypoints
     const nodeEdgesIdx2 = new Map(Object.entries(network.node_edges || {}))
-      const result = dijkstra(network, nodeEdgesIdx2, fromWp.nodeId, toWp.nodeId)
-    if (!result) {
+    let allSegments = []
+    let totalDistM = 0, totalEleGainM = 0, totalEleLossM = 0
+    let failed = false
+    for (let i = 0; i < newWps.length - 1; i++) {
+      const routed = routeWithVirtualNodes(network, nodeEdgesIdx2, newWps[i].snap, newWps[i + 1].snap)
+      if (!routed) { failed = true; break }
+      allSegments = [...allSegments, ...buildSegments(routed)]
+      totalDistM += routed.distanceM
+      totalEleGainM += routed.eleGainM
+      totalEleLossM += routed.eleLossM
+    }
+    if (failed) {
       setPlannedPath(null)
-      return
+      setToast({ message: t('keineVerbindung'), id: Date.now() })
+      setTimeout(() => setToast(null), 3000)
+    } else {
+      setPlannedPath({ segments: allSegments, totalDistM, totalEleGainM, totalEleLossM })
     }
-    const segments = result.edgeIds.map((eid) => {
-      const edge = network.edges[eid]
-      return { edgeId: eid, geometry: edge.geometry, source_route_id: edge.source_route_id }
-    })
-    const newPath = {
-      segments,
-      totalDistM: result.distanceM,
-      totalEleGainM: result.eleGainM,
-      totalEleLossM: result.eleLossM,
-    }
-    setPlannedPath(newPath)
-    setHighlightedRouteIds([...new Set(newPath.segments.map((s) => s.source_route_id))])
   }
 
   function handleWaypointClear() {
@@ -343,7 +318,7 @@ export default function App() {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
         {/* Map */}
         <div style={{ flex: 1, position: 'relative' }}>
-          <Map
+          <MapView
             routes={routes}
             allRoutes={allRoutes}
             connectivity={connectivity}
@@ -354,6 +329,7 @@ export default function App() {
             tileLayer={tileLayer}
             onTileLayerChange={setTileLayer}
             onRouteClick={handleRouteClick}
+            onRouteHover={setHoveredRouteId}
             onMapClick={handleMapClick}
             startPoint={startPoint}
             plannerMode={plannerMode}
@@ -466,6 +442,7 @@ export default function App() {
               routes={routes}
               riddenIds={riddenIds}
               selectedRouteId={selectedRouteId}
+              hoveredRouteId={hoveredRouteId}
               onRouteClick={handleRouteClick}
             />
           </div>
@@ -505,7 +482,7 @@ export default function App() {
             elevationData={plannedPath ? computePathElevationProfile(plannedPath.segments) : null}
             onRemoveWaypoint={handleWaypointRemove}
             onClear={handleWaypointClear}
-            onSave={handlePlannerSave}
+            onPlannerSave={handlePlannerSave}
             onClose={handlePlannerClose}
           />
         )}

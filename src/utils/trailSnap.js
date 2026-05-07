@@ -1,14 +1,10 @@
 /**
- * trailSnap.js — Snap cursor to nearest trail edge / node.
+ * trailSnap.js — Snap cursor to nearest trail edge(s).
  * All coords in [lon, lat].
  */
 
 import { haversineM } from './geo.js'
 
-/**
- * Build a bbox index over all edges for fast spatial filtering.
- * Returns Map<edgeId, [minLon, minLat, maxLon, maxLat]>.
- */
 export function buildEdgeBBoxIndex(trailNetwork) {
   const bboxMap = new Map()
   for (const [eid, edge] of Object.entries(trailNetwork.edges)) {
@@ -19,89 +15,68 @@ export function buildEdgeBBoxIndex(trailNetwork) {
   return bboxMap
 }
 
-/**
- * Find the nearest point on a polyline segment to a query point.
- * Returns { t, distM } where t is in [0, 1] along the segment.
- */
 function nearestPointOnSegment(qx, qy, ax, ay, bx, by) {
-  const dx = bx - ax
-  const dy = by - ay
+  const dx = bx - ax, dy = by - ay
   const lenSq = dx * dx + dy * dy
-  if (lenSq === 0) return { t: 0, distM: haversineM([qx, qy], [ax, ay]) }
+  if (lenSq === 0) return { t: 0, projX: ax, projY: ay, distM: haversineM([qx, qy], [ax, ay]) }
   const t = Math.max(0, Math.min(1, ((qx - ax) * dx + (qy - ay) * dy) / lenSq))
-  const projX = ax + t * dx
-  const projY = ay + t * dy
-  return { t, distM: haversineM([qx, qy], [projX, projY]) }
+  const projX = ax + t * dx, projY = ay + t * dy
+  return { t, projX, projY, distM: haversineM([qx, qy], [projX, projY]) }
 }
 
 /**
- * Snap a map cursor to the nearest trail network node.
+ * Returns the primary snap (nearest edge) plus up to maxCandidates alternative snap
+ * edges within maxDistM. Caller can try all candidates for routing to handle
+ * cases where the click is between two disconnected route segments.
  *
- * @param {[lon, lat]} lngLat     — query point
- * @param {Object} trailNetwork    — { nodes, edges }
- * @param {Map} edgeBBoxIndex     — Map<edgeId, [minLon,...] from buildEdgeBBoxIndex
- * @param {number} maxDistM       — max snap distance in meters (default 150)
- * @returns {{ nodeId, edgeId, snappedCoords: [lon,lat], distM } | null}
+ * Each candidate: { edgeId, snappedCoords, splitSegIdx, distM }
+ * Return: { snappedCoords, candidates } or null.
  */
-export function snapToTrail(lngLat, trailNetwork, edgeBBoxIndex, maxDistM = 150) {
+export function snapToTrail(lngLat, trailNetwork, edgeBBoxIndex, maxDistM = 200, maxCandidates = 6) {
   const [qx, qy] = lngLat
-  const { nodes, edges } = trailNetwork
-
-  let bestDist = Infinity
-  let bestNodeId = null
-  let bestEdgeId = null
-  let bestSnappedCoords = null
-
-  // Spatial filter: skip edges whose bbox is > 0.01° from query
+  const { edges } = trailNetwork
   const FILTER_DEG = 0.01
+
+  // Collect best match per edge
+  const edgeBest = new Map()
 
   for (const [eid, edge] of Object.entries(edges)) {
     const bbox = edgeBBoxIndex.get(eid)
     if (!bbox) continue
     if (qx < bbox[0] - FILTER_DEG || qx > bbox[2] + FILTER_DEG) continue
     if (qy < bbox[1] - FILTER_DEG || qy > bbox[3] + FILTER_DEG) continue
-
     const geom = edge.geometry
     if (!geom || geom.length < 2) continue
 
-    // Check each segment of this edge's polyline
+    let eBest = null
     for (let i = 0; i < geom.length - 1; i++) {
-      const [ax, ay] = geom[i]
-      const [bx, by] = geom[i + 1]
-      const { t, distM } = nearestPointOnSegment(qx, qy, ax, ay, bx, by)
-      if (distM < bestDist && distM <= maxDistM) {
-        bestDist = distM
-        bestEdgeId = eid
-
-        // Snapped coords — project point onto segment
-        const dx = bx - ax
-        const dy = by - ay
-        const snappedX = ax + t * dx
-        const snappedY = ay + t * dy
-        bestSnappedCoords = [round6(snappedX), round6(snappedY)]
+      const [ax, ay] = geom[i], [bx, by] = geom[i + 1]
+      const { projX, projY, distM } = nearestPointOnSegment(qx, qy, ax, ay, bx, by)
+      if (distM <= maxDistM && (!eBest || distM < eBest.distM)) {
+        eBest = { edgeId: eid, snappedCoords: [r6(projX), r6(projY)], splitSegIdx: i, distM }
       }
     }
+    if (eBest) edgeBest.set(eid, eBest)
   }
 
-  if (!bestEdgeId) return null
+  if (edgeBest.size === 0) return null
 
-  // Return the nearest node (from_node or to_node of the nearest edge,
-  // whichever is closer to the projected point)
-  const edge = edges[bestEdgeId]
-  const fromCoords = nodes[edge.from]?.coords
-  const toCoords = nodes[edge.to]?.coords
-  const fromDist = fromCoords ? haversineM(bestSnappedCoords, fromCoords) : Infinity
-  const toDist = toCoords ? haversineM(bestSnappedCoords, toCoords) : Infinity
-  bestNodeId = fromDist <= toDist ? edge.from : edge.to
+  const sorted = [...edgeBest.values()].sort((a, b) => a.distM - b.distM)
+  const candidates = sorted.slice(0, maxCandidates)
+
+  // Nearest graph nodes — catches junction nodes the virtual-edge split might miss
+  const nodeCandidates = []
+  for (const [nid, node] of Object.entries(trailNetwork.nodes)) {
+    const d = haversineM([qx, qy], node.coords)
+    if (d <= maxDistM) nodeCandidates.push({ nodeId: nid, distM: d })
+  }
+  nodeCandidates.sort((a, b) => a.distM - b.distM)
 
   return {
-    nodeId: bestNodeId,
-    edgeId: bestEdgeId,
-    snappedCoords: bestSnappedCoords,
-    distM: Math.round(bestDist),
+    snappedCoords: candidates[0].snappedCoords,
+    candidates,
+    nearestNodes: nodeCandidates.slice(0, 6),
   }
 }
 
-function round6(n) {
-  return Math.round(n * 1e6) / 1e6
-}
+function r6(n) { return Math.round(n * 1e6) / 1e6 }

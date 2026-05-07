@@ -1,38 +1,38 @@
 :root {
-  /* Background */
-  --bg-primary: #1a1a18;
-  --bg-secondary: #242422;
-  --bg-tertiary: #2e2e2b;
-  --border: #3a3a36;
+  /* Backgrounds — warm linen / parchment */
+  --bg-primary:   #f2ece0;
+  --bg-secondary: #ebe4d4;
+  --bg-tertiary:  #dfd8c8;
+  --border:       #c4bba8;
 
-  /* Text */
-  --text-primary: #e8e6e1;
-  --text-secondary: #9a9890;
-  --text-tertiary: #6b6960;
+  /* Text — warm dark browns */
+  --text-primary:   #2c2218;
+  --text-secondary: #6e5f4e;
+  --text-tertiary:  #9e8e7c;
 
-  /* Difficulty */
-  --difficulty-leicht: #6b9e78;
-  --difficulty-mittel: #4a7fc1;
-  --difficulty-schwer: #c45a3c;
+  /* Difficulty (kept saturated for map route visibility) */
+  --difficulty-leicht: #4d8a50;
+  --difficulty-mittel: #3a6fa8;
+  --difficulty-schwer: #b54035;
 
   /* Coverage */
-  --ridden: #e8e6e1;
-  --unridden: #4a4a44;
+  --ridden:   #7a8c68;
+  --unridden: #c0b8a8;
 
   /* Bike types */
-  --bike-mtb: #c4943d;
-  --bike-ebike: #5a8f9e;
-  --bike-gravel: #9e7a5a;
+  --bike-mtb:    #b86840;
+  --bike-ebike:  #4a7a8a;
+  --bike-gravel: #7a6848;
 
-  /* Accent — sparingly */
-  --accent: #d4a853;
+  /* Accent — desaturated terracotta */
+  --accent: #b86040;
 
   /* Panels */
-  --panel-bg: rgba(26, 26, 24, 0.92);
+  --panel-bg:       rgba(242, 236, 224, 0.97);
   --panel-backdrop: blur(12px);
 
   /* Fonts */
-  --font-ui: 'DM Sans', 'Instrument Sans', system-ui, sans-serif;
+  --font-ui:   'DM Sans', 'Instrument Sans', system-ui, sans-serif;
   --font-mono: 'DM Mono', 'JetBrains Mono', 'Fira Mono', monospace;
 
   /* Spacing (8px grid) */
@@ -47,7 +47,7 @@
   --radius: 4px;
 
   /* Map overlay */
-  --map-control-bg: rgba(26, 26, 24, 0.85);
+  --map-control-bg: rgba(235, 228, 214, 0.93);
 }
 
 *, *::before, *::after {
@@ -147,9 +147,9 @@ input:focus, select:focus, textarea:focus {
   border-radius: 3px;
   letter-spacing: 0.04em;
 }
-.badge-leicht { background: rgba(107, 158, 120, 0.2); color: var(--difficulty-leicht); }
-.badge-mittel { background: rgba(74, 127, 193, 0.2); color: var(--difficulty-mittel); }
-.badge-schwer { background: rgba(196, 90, 60, 0.2); color: var(--difficulty-schwer); }
+.badge-leicht { background: rgba(77, 138, 80, 0.12); color: var(--difficulty-leicht); }
+.badge-mittel { background: rgba(58, 111, 168, 0.12); color: var(--difficulty-mittel); }
+.badge-schwer { background: rgba(181, 64, 53, 0.12); color: var(--difficulty-schwer); }
 
 /* ── SuggestionFlow ────────────────────────────────────────────────────────── */
 .suggestion-flow {
@@ -505,7 +505,7 @@ input:focus, select:focus, textarea:focus {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.65);
+  background: rgba(44, 34, 24, 0.55);
   display: flex;
   align-items: center;
   justify-content: center;

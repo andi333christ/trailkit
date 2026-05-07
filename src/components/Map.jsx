@@ -21,9 +21,9 @@ const TILE_LAYERS = {
 }
 
 const DIFFICULTY_COLOR = {
-  leicht: '#6b9e78',
-  mittel: '#4a7fc1',
-  schwer: '#c45a3c',
+  leicht: '#5a9060',
+  mittel: '#4878b0',
+  schwer: '#c04838',
 }
 
 const DEFAULT_CENTER = [16.05, 48.15] // [lon, lat]
@@ -41,6 +41,7 @@ export function Map({
   onTileLayerChange,
   onRouteClick,
   onMapClick,
+  onRouteHover,
   startPoint,
   onStartPointSet,
   // Planner props
@@ -53,19 +54,28 @@ export function Map({
 }) {
   const mapContainer = useRef(null)
   const map = useRef(null)
+  const waypointMarkersRef = useRef([])
   const onMapClickRef = useRef(onMapClick)
   const onRouteClickRef = useRef(onRouteClick)
   const [mapLoaded, setMapLoaded] = useState(false)
   const [maplibreSupported, setMaplibreSupported] = useState(true)
+  const [terrain3d, setTerrain3d] = useState(false)
 
   useEffect(() => { onMapClickRef.current = onMapClick }, [onMapClick])
   useEffect(() => { onRouteClickRef.current = onRouteClick }, [onRouteClick])
+  const onRouteHoverRef = useRef(onRouteHover)
+  useEffect(() => { onRouteHoverRef.current = onRouteHover }, [onRouteHover])
   const onPlannerClickRef = useRef(onPlannerClick)
   const onPlannerMouseMoveRef = useRef(onPlannerMouseMove)
   useEffect(() => { onPlannerClickRef.current = onPlannerClick }, [onPlannerClick])
   useEffect(() => { onPlannerMouseMoveRef.current = onPlannerMouseMove }, [onPlannerMouseMove])
   const plannerModeRef = useRef(plannerMode)
-  useEffect(() => { plannerModeRef.current = plannerMode }, [plannerMode])
+  useEffect(() => {
+    plannerModeRef.current = plannerMode
+    if (!plannerMode && map.current) {
+      map.current.getCanvas().style.cursor = ''
+    }
+  }, [plannerMode])
 
   // Init map
   useEffect(() => {
@@ -89,7 +99,7 @@ export function Map({
               id: 'osm-tiles-layer',
               type: 'raster',
               source: 'osm-tiles',
-              paint: { 'raster-saturation': -0.4, 'raster-brightness-max': 0.9, 'raster-opacity': 0.8 },
+              paint: { 'raster-saturation': -0.2, 'raster-brightness-max': 1.0, 'raster-opacity': 1.0 },
             },
           ],
         },
@@ -106,22 +116,35 @@ export function Map({
         map.current.addSource('routes', {
           type: 'geojson',
           data: { type: 'FeatureCollection', features: [] },
+          promoteId: 'id',   // use properties.id (string slug) as feature ID for setFeatureState
         })
 
-        // White outline layer for selected route (rendered below colored)
+        // Hover outline — shows on mouseover (below selected, below route line)
+        map.current.addLayer({
+          id: 'routes-hover-outline',
+          type: 'line',
+          source: 'routes',
+          paint: {
+            'line-color': '#e07838',
+            'line-width': ['interpolate', ['linear'], ['zoom'], 9, 9, 15, 16],
+            'line-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.6, 0],
+          },
+        })
+
+        // Selected outline — fully opaque amber glow
         map.current.addLayer({
           id: 'routes-selected-outline',
           type: 'line',
           source: 'routes',
           filter: ['boolean', ['get', 'selected'], false],
           paint: {
-            'line-color': '#ffffff',
-            'line-width': ['interpolate', ['linear'], ['zoom'], 9, 10, 15, 18],
-            'line-opacity': 0.7,
+            'line-color': '#e07838',
+            'line-width': ['interpolate', ['linear'], ['zoom'], 9, 9, 15, 16],
+            'line-opacity': 1.0,
           },
         })
 
-        // All routes (colored, on top of outline)
+        // All routes (colored, on top of outlines)
         map.current.addLayer({
           id: 'routes-simplified',
           type: 'line',
@@ -130,21 +153,16 @@ export function Map({
             'line-color': ['get', 'color'],
             'line-width': [
               'interpolate', ['linear'], ['zoom'],
-              9, ['case', ['get', 'highlighted'], 6, 4],
-              15, ['case', ['get', 'highlighted'], 14, 10],
+              9, ['case',
+                ['any', ['boolean', ['feature-state', 'hovered'], false], ['get', 'highlighted']], 5,
+                2,
+              ],
+              15, ['case',
+                ['any', ['boolean', ['feature-state', 'hovered'], false], ['get', 'highlighted']], 12,
+                5,
+              ],
             ],
-            'line-opacity': ['case', ['get', 'dimmed'], 0.35, 1.0],
-          },
-        })
-
-        map.current.addLayer({
-          id: 'routes-hover',
-          type: 'line',
-          source: 'routes',
-          paint: {
-            'line-color': ['get', 'color'],
-            'line-width': 8,
-            'line-opacity': 0,
+            'line-opacity': 1.0,
           },
         })
 
@@ -159,9 +177,9 @@ export function Map({
           source: 'start-point',
           paint: {
             'circle-radius': 8,
-            'circle-color': '#d4a853',
+            'circle-color': '#b86040',
             'circle-stroke-width': 2,
-            'circle-stroke-color': '#fff',
+            'circle-stroke-color': '#f2ece0',
           },
         })
 
@@ -179,27 +197,12 @@ export function Map({
             'line-join': 'round',
           },
           paint: {
-            'line-color': '#d4a853',
+            'line-color': '#c87840',
             'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5, 15, 9],
-            'line-opacity': 0.9,
+            'line-opacity': 0.95,
           },
         })
 
-        map.current.addSource('plan-waypoints', {
-          type: 'geojson',
-          data: { type: 'FeatureCollection', features: [] },
-        })
-        map.current.addLayer({
-          id: 'plan-waypoints-circle',
-          type: 'circle',
-          source: 'plan-waypoints',
-          paint: {
-            'circle-radius': 8,
-            'circle-color': '#d4a853',
-            'circle-stroke-width': 2,
-            'circle-stroke-color': '#ffffff',
-          },
-        })
         map.current.addSource('snap-preview', {
           type: 'geojson',
           data: { type: 'FeatureCollection', features: [] },
@@ -210,13 +213,22 @@ export function Map({
           source: 'snap-preview',
           paint: {
             'circle-radius': 5,
-            'circle-color': '#ffffff',
-            'circle-opacity': 0.85,
-            'circle-stroke-width': 1.5,
-            'circle-stroke-color': '#d4a853',
+            'circle-color': '#f2ece0',
+            'circle-opacity': 0.9,
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#b86040',
           },
         })
 
+
+        // Terrain DEM source (AWS Terrain Tiles, terrarium encoding, free/no-key)
+        map.current.addSource('terrain-dem', {
+          type: 'raster-dem',
+          tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+          tileSize: 256,
+          encoding: 'terrarium',
+          maxzoom: 15,
+        })
 
         setMapLoaded(true)
 
@@ -240,12 +252,6 @@ export function Map({
       })
 
       map.current.on('click', (e) => {
-        console.log('[Map] click', {
-          plannerMode: plannerModeRef.current,
-          hasOnPlanner: !!onPlannerClickRef.current,
-          hasOnMap: !!onMapClickRef.current,
-          coords: [e.lngLat.lng, e.lngLat.lat]
-        })
         if (plannerModeRef.current) {
           onPlannerClickRef.current?.([e.lngLat.lng, e.lngLat.lat])
         } else {
@@ -259,16 +265,20 @@ export function Map({
 
       let hoveredRouteId = null
       let lastPlannerMove = 0
-      map.current.on('mousemove', 'routes-simplified', (e) => {
-        if (plannerModeRef.current) {
-          const now = Date.now()
-          if (now - lastPlannerMove > 16) {
-            onPlannerMouseMoveRef.current?.([e.lngLat.lng, e.lngLat.lat])
-            lastPlannerMove = now
-          }
-          map.current.getCanvas().style.cursor = 'crosshair'
-          return
+
+      // General mousemove: planner snap preview + crosshair cursor across entire map
+      map.current.on('mousemove', (e) => {
+        if (!plannerModeRef.current) return
+        map.current.getCanvas().style.cursor = 'crosshair'
+        const now = Date.now()
+        if (now - lastPlannerMove > 16) {
+          onPlannerMouseMoveRef.current?.([e.lngLat.lng, e.lngLat.lat])
+          lastPlannerMove = now
         }
+      })
+
+      map.current.on('mousemove', 'routes-simplified', (e) => {
+        if (plannerModeRef.current) return
         if (e.features.length > 0) {
           if (hoveredRouteId !== null) {
             map.current.setFeatureState({ source: 'routes', id: hoveredRouteId }, { hovered: false })
@@ -276,21 +286,22 @@ export function Map({
           hoveredRouteId = e.features[0].id
           map.current.setFeatureState({ source: 'routes', id: hoveredRouteId }, { hovered: true })
           map.current.getCanvas().style.cursor = 'pointer'
+          onRouteHoverRef.current?.(e.features[0].properties?.id || null)
         }
       })
       map.current.on('mouseleave', 'routes-simplified', () => {
-        if (plannerModeRef.current) {
-          map.current.getCanvas().style.cursor = 'crosshair'
-        } else {
-          if (hoveredRouteId !== null) {
-            map.current.setFeatureState({ source: 'routes', id: hoveredRouteId }, { hovered: false })
-          }
-          hoveredRouteId = null
-          map.current.getCanvas().style.cursor = ''
+        if (plannerModeRef.current) return
+        if (hoveredRouteId !== null) {
+          map.current.setFeatureState({ source: 'routes', id: hoveredRouteId }, { hovered: false })
         }
+        hoveredRouteId = null
+        map.current.getCanvas().style.cursor = ''
+        onRouteHoverRef.current?.(null)
       })
 
       cleanup = () => {
+        waypointMarkersRef.current.forEach((m) => m.remove())
+        waypointMarkersRef.current = []
         if (map.current) {
           map.current.remove()
           map.current = null
@@ -304,6 +315,18 @@ export function Map({
     return cleanup
   }, [])
 
+  // Terrain 3D toggle
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return
+    if (terrain3d) {
+      map.current.setTerrain({ source: 'terrain-dem', exaggeration: 2 })
+      map.current.easeTo({ pitch: 50, duration: 600 })
+    } else {
+      map.current.setTerrain(null)
+      map.current.easeTo({ pitch: 0, duration: 600 })
+    }
+  }, [terrain3d, mapLoaded])
+
   // Update tile layer
   useEffect(() => {
     if (!map.current || !mapLoaded) return
@@ -311,7 +334,8 @@ export function Map({
     const source = map.current.getSource('osm-tiles')
     if (source) {
       source.setTiles([layer.url])
-      map.current.setPaintProperty('osm-tiles-layer', 'raster-saturation', tileLayer === 'satellit' ? -0.6 : -0.4)
+      map.current.setPaintProperty('osm-tiles-layer', 'raster-saturation', tileLayer === 'satellit' ? 0.0 : -0.15)
+      map.current.setPaintProperty('osm-tiles-layer', 'raster-opacity', 1.0)
     }
   }, [tileLayer, mapLoaded])
 
@@ -335,9 +359,9 @@ export function Map({
           color = DIFFICULTY_COLOR[r.difficulty] || '#c4943d'
         }
 
-        // Verbindungsweg and Zubringer always render in accent yellow
+        // Verbindungsweg and Zubringer render in muted army green
         if (r.id.includes('verbindungsweg') || r.id.includes('zubringer')) {
-          color = '#9a9890'
+          color = '#7a8c60'
         }
 
         return {
@@ -368,6 +392,7 @@ export function Map({
   }, [routes, colorMode, riddenIds, selectedRouteId, highlightedRouteIds, mapLoaded])
 
   function handleRouteClick(e) {
+    if (plannerModeRef.current) return
     const feature = e.features?.[0]
     if (feature) onRouteClickRef.current?.(feature.properties.id)
   }
@@ -406,17 +431,28 @@ export function Map({
     source.setData({ type: 'FeatureCollection', features })
   }, [plannedPath, mapLoaded])
 
-  // plan-waypoints
+  // plan-waypoints — numbered HTML markers
   useEffect(() => {
     if (!mapLoaded || !map.current) return
-    const source = map.current.getSource('plan-waypoints')
-    if (!source) return
-    const features = planWaypoints.map((wp) => ({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: wp.coords },
-      properties: { id: wp.id },
-    }))
-    source.setData({ type: 'FeatureCollection', features })
+    waypointMarkersRef.current.forEach((m) => m.remove())
+    waypointMarkersRef.current = []
+    planWaypoints.forEach((wp, i) => {
+      const el = document.createElement('div')
+      Object.assign(el.style, {
+        width: '22px', height: '22px', borderRadius: '50%',
+        background: '#b86040', border: '2.5px solid #f2ece0',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: '#f2ece0', fontWeight: '700', fontSize: '11px',
+        fontFamily: 'system-ui, sans-serif',
+        boxShadow: '0 1px 5px rgba(44,34,24,0.35)',
+        cursor: 'default', userSelect: 'none',
+      })
+      el.textContent = String(i + 1)
+      const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat(wp.coords)
+        .addTo(map.current)
+      waypointMarkersRef.current.push(marker)
+    })
   }, [planWaypoints, mapLoaded])
 
   // snap-preview
@@ -449,11 +485,16 @@ export function Map({
   // Fly to highlighted chain
   useEffect(() => {
     if (!mapLoaded || !map.current || highlightedRouteIds.length === 0) return
-    const bounds = routes
+    const pts = routes
       .filter((r) => highlightedRouteIds.includes(r.id) && r.bbox)
       .flatMap((r) => [[r.bbox[0], r.bbox[1]], [r.bbox[2], r.bbox[3]]])
-    if (bounds.length > 0) {
-      map.current.fitBounds(bounds, { padding: { top: 80, bottom: 80, left: 400, right: 80 }, maxZoom: 14, duration: 800 })
+    if (pts.length > 0) {
+      const lons = pts.map((p) => p[0])
+      const lats = pts.map((p) => p[1])
+      map.current.fitBounds(
+        [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+        { padding: { top: 80, bottom: 80, left: 400, right: 80 }, maxZoom: 14, duration: 800 }
+      )
     }
   }, [highlightedRouteIds, mapLoaded])
 
@@ -498,6 +539,22 @@ export function Map({
             {layer.label}
           </button>
         ))}
+        <div style={{ height: 1, background: 'var(--border)', margin: '2px 0' }} />
+        <button
+          onClick={() => setTerrain3d((v) => !v)}
+          style={{
+            padding: '4px 10px',
+            fontSize: 11,
+            fontWeight: 500,
+            borderRadius: 3,
+            background: terrain3d ? 'var(--accent)' : 'transparent',
+            color: terrain3d ? 'var(--bg-primary)' : 'var(--text-secondary)',
+            transition: 'all 0.15s',
+            textAlign: 'left',
+          }}
+        >
+          3D
+        </button>
       </div>
 
       {/* Color mode toggle */}

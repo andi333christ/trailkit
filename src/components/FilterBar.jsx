@@ -56,8 +56,8 @@ export function FilterBar({ filters, onChange, totalCount, filteredCount }) {
           onChange={(e) => setFilter('search', e.target.value)}
           style={{ flex: 1, height: 32 }}
         />
-        <span className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-          {t('routesCount', { count: filteredCount, total: totalCount })}
+        <span className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
+          {filteredCount}/{totalCount}
         </span>
         <button
           className="btn-ghost"

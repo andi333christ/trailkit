@@ -1,26 +1,26 @@
 /**
- * trailRouter.js — Dijkstra shortest-path on the trail topology graph.
+ * trailRouter.js — Dijkstra + virtual-node routing on the trail topology graph.
  * All coords in [lon, lat].
  */
 
+import { haversineM } from './geo.js'
+
+function geomDist(geometry) {
+  let d = 0
+  for (let i = 1; i < geometry.length; i++) d += haversineM(geometry[i - 1], geometry[i])
+  return d
+}
+
 /**
- * Standard Dijkstra on the trail graph.
- *
- * @param {Object} trailNetwork       — { nodes, edges, node_edges }
- * @param {Map} nodeEdgesIndex       — Map<nodeId, edgeId[]> (from network.node_edges)
- * @param {string} fromNodeId
- * @param {string} toNodeId
- * @returns {{ edgeIds: string[], nodeIds: string[], distanceM: number,
- *            eleGainM: number, eleLossM: number } | null}
+ * Dijkstra shortest-path.
+ * nodeEdgesIndex must be a Map<nodeId, edgeId[]>.
  */
 export function dijkstra(trailNetwork, nodeEdgesIndex, fromNodeId, toNodeId) {
-  console.log('[dijkstra] START', { fromNodeId, toNodeId, nodeEdgesIndexSize: nodeEdgesIndex.size })
   const { nodes, edges } = trailNetwork
 
-  // Priority queue: [nodeId, distM]
   const pq = [[fromNodeId, 0]]
   const dist = new Map()
-  const prev = new Map() // nodeId → { edgeId, nodeId }
+  const prev = new Map()
   dist.set(fromNodeId, 0)
 
   while (pq.length > 0) {
@@ -30,30 +30,11 @@ export function dijkstra(trailNetwork, nodeEdgesIndex, fromNodeId, toNodeId) {
     if (currId === toNodeId) break
     if (currDist > (dist.get(currId) ?? Infinity)) continue
 
-    const incidentEdges = nodeEdgesIndex.get(currId) || []
-    for (const eid of incidentEdges) {
+    for (const eid of (nodeEdgesIndex.get(currId) || [])) {
       const edge = edges[eid]
       if (!edge) continue
-
-      const fromN = edge.from
-      const toN = edge.to
-      const neighbor = fromN === currId ? toN : fromN
-
-      // Skip non-bidirectional edges traversed the wrong way
-      if (!edge.bidirectional && neighbor === toN && fromN !== fromNodeId) {
-        // This edge is from→to only and we're not going forward
-        // Actually, if bidirectional=false, it means the edge can only be traversed
-        // in the to→from direction... wait, re-read the spec:
-        // "bidirectional: true for loops, false otherwise"
-        // This means for non-loops (one-way in trail sense), we can still traverse both
-        // directions because MTB can go either way on a trail.
-        // bidirectional=false just means "this edge is part of a non-loop route".
-        // So we always allow both directions for routing purposes.
-      }
-
-      const edgeDist = edge.distance_m || 0
-      const newDist = currDist + edgeDist
-
+      const neighbor = edge.from === currId ? edge.to : edge.from
+      const newDist = currDist + (edge.distance_m || 0)
       if (newDist < (dist.get(neighbor) ?? Infinity)) {
         dist.set(neighbor, newDist)
         prev.set(neighbor, { edgeId: eid, nodeId: currId })
@@ -64,7 +45,6 @@ export function dijkstra(trailNetwork, nodeEdgesIndex, fromNodeId, toNodeId) {
 
   if (!prev.has(toNodeId) && fromNodeId !== toNodeId) return null
 
-  // Reconstruct path
   const edgeIds = []
   const nodeIds = []
   let cur = toNodeId
@@ -76,23 +56,130 @@ export function dijkstra(trailNetwork, nodeEdgesIndex, fromNodeId, toNodeId) {
   }
   nodeIds.push(toNodeId)
 
-  // Sum elevation
-  let totalGain = 0
-  let totalLoss = 0
+  let totalGain = 0, totalLoss = 0
   for (const eid of edgeIds) {
     totalGain += edges[eid]?.ele_gain_m || 0
     totalLoss += edges[eid]?.ele_loss_m || 0
   }
 
-  const totalDist = dist.get(toNodeId) ?? 0
+  return { edgeIds, nodeIds, distanceM: dist.get(toNodeId) ?? 0, eleGainM: totalGain, eleLossM: totalLoss }
+}
 
-  const result = {
-    edgeIds,
-    nodeIds,
-    distanceM: totalDist,
-    eleGainM: totalGain,
-    eleLossM: totalLoss,
+/**
+ * Route between two multi-candidate snaps using virtual node insertion.
+ * Tries all candidate pairs and returns the shortest result.
+ *
+ * snap1/snap2: { snappedCoords, candidates: [{ edgeId, snappedCoords, splitSegIdx }] }
+ */
+export function routeWithVirtualNodes(network, nodeEdgesIndex, snap1, snap2) {
+  const cands1 = snap1.candidates || [snap1]
+  const cands2 = snap2.candidates || [snap2]
+  let best = null
+
+  // Virtual node pairs: insert split points at exact click positions
+  for (const c1 of cands1) {
+    for (const c2 of cands2) {
+      const r = routeSinglePair(network, nodeEdgesIndex, c1, c2)
+      if (r && (!best || r.distanceM < best.distanceM)) best = r
+    }
   }
-  console.log('[dijkstra] END', result ? `${result.edgeIds.length} edges` : 'NULL')
-  return result
+
+  // Real node pairs: try nearest graph nodes directly — catches junctions the
+  // edge-split approach misses when click is on a different route than the junction
+  const nn1 = snap1.nearestNodes || []
+  const nn2 = snap2.nearestNodes || []
+  for (const n1 of nn1) {
+    for (const n2 of nn2) {
+      if (n1.nodeId === n2.nodeId) continue
+      const r = dijkstra(network, nodeEdgesIndex, n1.nodeId, n2.nodeId)
+      if (r && (!best || r.distanceM < best.distanceM)) {
+        best = { ...r, augEdges: network.edges }
+      }
+    }
+  }
+
+  return best
+}
+
+function routeSinglePair(network, nodeEdgesIndex, snap1, snap2) {
+  const { edges } = network
+
+  const VN1 = '__vn1__'
+  const VN2 = '__vn2__'
+
+  // Shallow-copy nodes + edges; we'll add virtual entries without mutating originals.
+  const augNodes = { ...network.nodes, [VN1]: { coords: snap1.snappedCoords }, [VN2]: { coords: snap2.snappedCoords } }
+  const augEdges = { ...edges }
+
+  // Deep-copy nodeEdges index (Map of arrays)
+  const augNE = new Map()
+  for (const [nid, eids] of nodeEdgesIndex) augNE.set(nid, [...eids])
+
+  function splitEdge(snap, vnId) {
+    const edge = augEdges[snap.edgeId]
+    if (!edge) return   // already removed (same-edge second split handled below)
+
+    const geom = edge.geometry
+    const si = snap.splitSegIdx
+
+    const geomA = [...geom.slice(0, si + 1), snap.snappedCoords]
+    const geomB = [snap.snappedCoords, ...geom.slice(si + 1)]
+
+    const distA = Math.round(geomDist(geomA))
+    const distB = Math.round(geomDist(geomB))
+    const total = distA + distB || 1
+    const fracA = distA / total
+
+    const eaId = snap.edgeId + ':a:' + vnId
+    const ebId = snap.edgeId + ':b:' + vnId
+
+    augEdges[eaId] = {
+      from: edge.from, to: vnId, geometry: geomA, distance_m: distA,
+      source_route_id: edge.source_route_id,
+      ele_gain_m: Math.round((edge.ele_gain_m || 0) * fracA),
+      ele_loss_m: Math.round((edge.ele_loss_m || 0) * fracA),
+    }
+    augEdges[ebId] = {
+      from: vnId, to: edge.to, geometry: geomB, distance_m: distB,
+      source_route_id: edge.source_route_id,
+      ele_gain_m: Math.round((edge.ele_gain_m || 0) * (1 - fracA)),
+      ele_loss_m: Math.round((edge.ele_loss_m || 0) * (1 - fracA)),
+    }
+
+    delete augEdges[snap.edgeId]
+
+    // Update node-edge index: replace original edge with the two halves
+    augNE.set(edge.from, [...(augNE.get(edge.from) || []).filter((e) => e !== snap.edgeId), eaId])
+    augNE.set(edge.to,   [...(augNE.get(edge.to)   || []).filter((e) => e !== snap.edgeId), ebId])
+    augNE.set(vnId, [eaId, ebId])
+
+    return { eaId, ebId, edge }
+  }
+
+  const s1 = splitEdge(snap1, VN1)
+
+  if (snap1.edgeId === snap2.edgeId) {
+    // Same edge: snap1 split it into s1.eaId (from→VN1) and s1.ebId (VN1→to).
+    // Determine which half contains snap2 and split that half.
+    const si1 = snap1.splitSegIdx
+    const si2 = snap2.splitSegIdx
+    const origGeom = s1.edge.geometry
+
+    let segForSnap2, halfEdgeId
+    if (si2 < si1 || (si2 === si1)) {
+      // snap2 is in the "a" half (from→VN1); re-map splitSegIdx to local coords
+      halfEdgeId = s1.eaId
+      segForSnap2 = { edgeId: s1.eaId, snappedCoords: snap2.snappedCoords, splitSegIdx: si2 }
+    } else {
+      // snap2 is in the "b" half (VN1→to); adjust splitSegIdx (geomB starts at si1+1)
+      halfEdgeId = s1.ebId
+      segForSnap2 = { edgeId: s1.ebId, snappedCoords: snap2.snappedCoords, splitSegIdx: si2 - si1 }
+    }
+    splitEdge(segForSnap2, VN2)
+  } else {
+    splitEdge(snap2, VN2)
+  }
+
+  const result = dijkstra({ nodes: augNodes, edges: augEdges }, augNE, VN1, VN2)
+  return result ? { ...result, augEdges } : null
 }
