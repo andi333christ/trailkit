@@ -248,22 +248,20 @@ export default function App() {
   }
 
   function handleWaypointRemove(id) {
-    const idx = waypoints.findIndex((wp) => wp.id === id)
-    if (idx === -1) return
     const newWps = waypoints.filter((wp) => wp.id !== id)
     setWaypoints(newWps)
-    if (newWps.length < 2) {
+    rerouteAllWaypoints(newWps)
+  }
+
+  function rerouteAllWaypoints(wps) {
+    if (wps.length < 2) {
       setPlannedPath(null)
-      setHighlightedRouteIds([])
       return
     }
-    // Rebuild entire path from all remaining waypoints
-    const nodeEdgesIdx2 = new Map(Object.entries(network.node_edges || {}))
-    let allSegments = []
-    let totalDistM = 0, totalEleGainM = 0, totalEleLossM = 0
-    let failed = false
-    for (let i = 0; i < newWps.length - 1; i++) {
-      const routed = routeWithVirtualNodes(network, nodeEdgesIdx2, newWps[i].snap, newWps[i + 1].snap)
+    const nodeEdgesIdx = new Map(Object.entries(network.node_edges || {}))
+    let allSegments = [], totalDistM = 0, totalEleGainM = 0, totalEleLossM = 0, failed = false
+    for (let i = 0; i < wps.length - 1; i++) {
+      const routed = routeWithVirtualNodes(network, nodeEdgesIdx, wps[i].snap, wps[i + 1].snap)
       if (!routed) { failed = true; break }
       allSegments = [...allSegments, ...buildSegments(routed)]
       totalDistM += routed.distanceM
@@ -277,6 +275,26 @@ export default function App() {
     } else {
       setPlannedPath({ segments: allSegments, totalDistM, totalEleGainM, totalEleLossM })
     }
+  }
+
+  function handleWaypointDrag(id, [lng, lat]) {
+    if (!network || !edgeBBoxIndex) return
+    const snap = snapToTrail([lng, lat], network, edgeBBoxIndex)
+    if (!snap) return
+    const newWps = waypoints.map((wp) =>
+      wp.id === id ? { ...wp, snap, coords: snap.snappedCoords } : wp
+    )
+    setWaypoints(newWps)
+    rerouteAllWaypoints(newWps)
+  }
+
+  function handleReorderWaypoints(fromIdx, toIdx) {
+    if (fromIdx === toIdx) return
+    const newWps = [...waypoints]
+    const [moved] = newWps.splice(fromIdx, 1)
+    newWps.splice(toIdx, 0, moved)
+    setWaypoints(newWps)
+    rerouteAllWaypoints(newWps)
   }
 
   function handleWaypointClear() {
@@ -338,6 +356,7 @@ export default function App() {
             snapPreview={snapPreview}
             onPlannerClick={handlePlannerClick}
             onPlannerMouseMove={handlePlannerMouseMove}
+            onWaypointDrag={handleWaypointDrag}
           />
 
           {/* Color mode toggle */}
@@ -481,6 +500,7 @@ export default function App() {
             plannedPath={plannedPath}
             elevationData={plannedPath ? computePathElevationProfile(plannedPath.segments) : null}
             onRemoveWaypoint={handleWaypointRemove}
+            onReorderWaypoints={handleReorderWaypoints}
             onClear={handleWaypointClear}
             onPlannerSave={handlePlannerSave}
             onClose={handlePlannerClose}

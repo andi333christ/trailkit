@@ -51,6 +51,7 @@ export function Map({
   snapPreview = null,
   onPlannerClick,
   onPlannerMouseMove,
+  onWaypointDrag,
 }) {
   const mapContainer = useRef(null)
   const map = useRef(null)
@@ -67,8 +68,10 @@ export function Map({
   useEffect(() => { onRouteHoverRef.current = onRouteHover }, [onRouteHover])
   const onPlannerClickRef = useRef(onPlannerClick)
   const onPlannerMouseMoveRef = useRef(onPlannerMouseMove)
+  const onWaypointDragRef = useRef(onWaypointDrag)
   useEffect(() => { onPlannerClickRef.current = onPlannerClick }, [onPlannerClick])
   useEffect(() => { onPlannerMouseMoveRef.current = onPlannerMouseMove }, [onPlannerMouseMove])
+  useEffect(() => { onWaypointDragRef.current = onWaypointDrag }, [onWaypointDrag])
   const plannerModeRef = useRef(plannerMode)
   useEffect(() => {
     plannerModeRef.current = plannerMode
@@ -439,18 +442,26 @@ export function Map({
     planWaypoints.forEach((wp, i) => {
       const el = document.createElement('div')
       Object.assign(el.style, {
-        width: '22px', height: '22px', borderRadius: '50%',
+        width: '24px', height: '24px', borderRadius: '50%',
         background: '#b86040', border: '2.5px solid #f2ece0',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: '#f2ece0', fontWeight: '700', fontSize: '11px',
         fontFamily: 'system-ui, sans-serif',
         boxShadow: '0 1px 5px rgba(44,34,24,0.35)',
-        cursor: 'default', userSelect: 'none',
+        cursor: 'grab', userSelect: 'none',
+        transition: 'transform 0.1s',
       })
       el.textContent = String(i + 1)
-      const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+      const marker = new maplibregl.Marker({ element: el, anchor: 'center', draggable: true })
         .setLngLat(wp.coords)
         .addTo(map.current)
+      el.addEventListener('mousedown', () => { el.style.cursor = 'grabbing'; el.style.transform = 'scale(1.2)' })
+      marker.on('dragend', () => {
+        el.style.cursor = 'grab'
+        el.style.transform = ''
+        const { lng, lat } = marker.getLngLat()
+        onWaypointDragRef.current?.(wp.id, [lng, lat])
+      })
       waypointMarkersRef.current.push(marker)
     })
   }, [planWaypoints, mapLoaded])

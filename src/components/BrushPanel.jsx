@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useRef } from 'react'
 import { ElevationProfile } from './ElevationProfile.jsx'
 import { downloadChainGPX } from '../utils/export.js'
 import { t } from '../i18n/de.js'
@@ -16,11 +16,14 @@ export function BrushPanel({
   waypoints,
   plannedPath,
   onRemoveWaypoint,
+  onReorderWaypoints,
   onPlannerSave,
 }) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [showHints, setShowHints] = useState(true)
+  const dragIdxRef = useRef(null)
+  const [dropIdx, setDropIdx] = useState(null)
   const isPlanner = waypoints !== undefined
 
   const totalKm = chain ? chain.reduce((s, r) => s + (r.distance_km || 0), 0) : 0
@@ -82,22 +85,70 @@ export function BrushPanel({
 
           <div className="brush-panel__chain-list">
             {waypoints.map((wp, i) => (
-              <div key={wp.id} className="brush-panel__chain-item">
-                <div className="brush-panel__chain-idx">{i + 1}</div>
-                <div className="brush-panel__chain-info">
-                  <button
-                    className="brush-panel__route-name"
-                    onClick={() => onRemoveWaypoint?.(wp.id)}
-                    title={t('wegpunktEntfernen')}
-                  >
-                    Wegpunkt {i + 1}
-                  </button>
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <div key={wp.id}>
+                {/* Drop indicator above item */}
+                {dropIdx === i && (
+                  <div style={{ height: 2, background: 'var(--accent)', borderRadius: 1, margin: '2px 4px' }} />
+                )}
+                <div
+                  className="brush-panel__chain-item"
+                  draggable
+                  style={{ opacity: dragIdxRef.current === i ? 0.4 : 1, cursor: 'default' }}
+                  onDragStart={(e) => {
+                    dragIdxRef.current = i
+                    e.dataTransfer.effectAllowed = 'move'
+                  }}
+                  onDragEnd={() => { dragIdxRef.current = null; setDropIdx(null) }}
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const mid = rect.top + rect.height / 2
+                    setDropIdx(e.clientY < mid ? i : i + 1)
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    const from = dragIdxRef.current
+                    const to = dropIdx ?? i
+                    dragIdxRef.current = null
+                    setDropIdx(null)
+                    if (from !== null && from !== to && from !== to - 1) {
+                      onReorderWaypoints?.(from, to > from ? to - 1 : to)
+                    }
+                  }}
+                >
+                  {/* Drag handle */}
+                  <div style={{ cursor: 'grab', padding: '0 4px', color: 'var(--text-tertiary)', flexShrink: 0 }} title="Ziehen zum Umsortieren">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <circle cx="8" cy="6" r="1.5"/><circle cx="16" cy="6" r="1.5"/>
+                      <circle cx="8" cy="12" r="1.5"/><circle cx="16" cy="12" r="1.5"/>
+                      <circle cx="8" cy="18" r="1.5"/><circle cx="16" cy="18" r="1.5"/>
+                    </svg>
+                  </div>
+                  <div className="brush-panel__chain-idx">{i + 1}</div>
+                  <div className="brush-panel__chain-info">
+                    <span className="brush-panel__route-name" style={{ cursor: 'default' }}>
+                      Wegpunkt {i + 1}
+                    </span>
                     <span className="mono" style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
                       {wp.coords[0].toFixed(4)}, {wp.coords[1].toFixed(4)}
                     </span>
                   </div>
+                  <button
+                    className="btn-ghost"
+                    onClick={() => onRemoveWaypoint?.(wp.id)}
+                    title={t('wegpunktEntfernen')}
+                    style={{ padding: '2px 4px', flexShrink: 0 }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                  </button>
                 </div>
+                {/* Drop indicator below last item */}
+                {i === waypoints.length - 1 && dropIdx === waypoints.length && (
+                  <div style={{ height: 2, background: 'var(--accent)', borderRadius: 1, margin: '2px 4px' }} />
+                )}
                 {i < waypoints.length - 1 && (
                   <div className="brush-panel__chain-connector">
                     <div className="brush-panel__connector-line" />
