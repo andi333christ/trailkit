@@ -471,6 +471,29 @@ def main():
     if zero_edge:
         print(f"  WARNING: {len(zero_edge)} routes with 0 edges: {zero_edge[:8]}")
 
+    # Deduplicate parallel one-way edges between the same node pair.
+    # Multiple one-way edges between (from, to) arise when several overlapping
+    # trails (e.g. fun-line + fun-line-mit-zufahrt) share the same corridor.
+    # Keep only the shortest; the router then follows one consistent geometry
+    # instead of zigzagging between the slightly-offset GPS tracks.
+    from collections import defaultdict
+    oneway_by_pair = defaultdict(list)
+    for eid, ed in edges.items():
+        if ed.get('one_way'):
+            oneway_by_pair[(ed['from'], ed['to'])].append(eid)
+
+    removed = 0
+    for pair, eids in oneway_by_pair.items():
+        if len(eids) <= 1:
+            continue
+        # Sort by distance, keep shortest
+        eids.sort(key=lambda e: edges[e].get('distance_m', 0))
+        for eid in eids[1:]:
+            del edges[eid]
+            removed += 1
+    if removed:
+        print(f"  Removed {removed} duplicate one-way edges (parallel trail GPS tracks)")
+
     # 7. Node→edges index
     node_edges = {nid: [] for nid in nodes}
     for eid, ed in edges.items():

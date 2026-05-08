@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import trailEdgesData from '../data/trail_edges.json'
+// Trail route classification for directional arrow layer
+const _TRAIL_ARROW_KEYWORDS = ['trail', 'flow', 'fun', 'blackberry', 'raspberry', 'enduro']
+const _TRAIL_ARROW_EXCLUDE  = ['verbindungsweg', 'zubringer', 'uphill', 'auffahrt', 'mit-zufahrt']
+function isDownhillTrailRoute(id) {
+  if (_TRAIL_ARROW_EXCLUDE.some((k) => id.includes(k))) return false
+  return _TRAIL_ARROW_KEYWORDS.some((k) => id.includes(k))
+}
 
 const TILE_LAYERS = {
   gelande: {
@@ -226,10 +232,10 @@ export function Map({
         })
 
 
-        // Trail edges — directional arrows showing downhill riding direction
+        // Trail edges — directional arrows showing downhill riding direction (populated via allRoutes effect)
         map.current.addSource('trail-edges', {
           type: 'geojson',
-          data: trailEdgesData,
+          data: { type: 'FeatureCollection', features: [] },
         })
         map.current.addLayer({
           id: 'trail-arrows',
@@ -238,17 +244,18 @@ export function Map({
           minzoom: 13,
           layout: {
             'symbol-placement': 'line',
-            'symbol-spacing': 48,
-            'text-field': '▶',
-            'text-size': 10,
+            'symbol-spacing': 80,
+            'text-field': '›',
+            'text-size': 14,
             'text-rotation-alignment': 'map',
             'text-keep-upright': false,
             'text-allow-overlap': false,
+            'text-ignore-placement': false,
           },
           paint: {
-            'text-color': 'rgba(255, 255, 255, 0.9)',
-            'text-halo-color': 'rgba(0, 0, 0, 0.45)',
-            'text-halo-width': 1.5,
+            'text-color': 'rgba(255, 255, 255, 0.75)',
+            'text-halo-color': 'rgba(0, 0, 0, 0.0)',
+            'text-halo-width': 0,
           },
         })
 
@@ -369,6 +376,21 @@ export function Map({
       map.current.setPaintProperty('osm-tiles-layer', 'raster-opacity', 1.0)
     }
   }, [tileLayer, mapLoaded])
+
+  // Trail arrow layer — uses full route geometries (smooth) instead of topology edges (choppy)
+  useEffect(() => {
+    if (!mapLoaded || !map.current) return
+    const source = map.current.getSource('trail-edges')
+    if (!source) return
+    const features = allRoutes
+      .filter((r) => isDownhillTrailRoute(r.id) && r.geometry)
+      .map((r) => ({
+        type: 'Feature',
+        geometry: r.geometry,
+        properties: { id: r.id },
+      }))
+    source.setData({ type: 'FeatureCollection', features })
+  }, [allRoutes, mapLoaded])
 
   // Build GeoJSON features
   useEffect(() => {
