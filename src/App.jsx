@@ -199,12 +199,18 @@ export default function App() {
       setToast({ message: t('keineVerbindung'), id: Date.now() })
       setTimeout(() => setToast(null), 3000)
     } else {
-      // Wrap as a single segment so BrushPanel + GPX export still work
+      const elevationData = result.elevationProfile ? {
+        points: result.elevationProfile,
+        totalDistKm: result.distanceM / 1000,
+        totalEleGain: result.eleGainM,
+        totalEleLoss: result.eleLossM,
+      } : null
       setPlannedPath({
         segments: [{ geometry: result.coords, ele_gain_m: result.eleGainM, ele_loss_m: result.eleLossM }],
         totalDistM: result.distanceM,
         totalEleGainM: result.eleGainM,
         totalEleLossM: result.eleLossM,
+        elevationData,
       })
     }
   }
@@ -442,7 +448,7 @@ export default function App() {
           <BrushPanel
             waypoints={waypoints}
             plannedPath={plannedPath}
-            elevationData={plannedPath ? computePathElevationProfile(plannedPath.segments) : null}
+            elevationData={plannedPath?.elevationData ?? null}
             onRemoveWaypoint={handleWaypointRemove}
             onReorderWaypoints={handleReorderWaypoints}
             onClear={handleWaypointClear}

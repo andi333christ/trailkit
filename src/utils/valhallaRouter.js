@@ -3,7 +3,7 @@
  * No API key required. Uses bicycle/Mountain profile which respects MTB trails + oneway.
  */
 
-const VALHALLA_URL = 'https://valhalla1.openstreetmap.de/route'
+const VALHALLA_BASE = 'https://valhalla1.openstreetmap.de'
 
 // Decode Valhalla's precision-6 encoded polyline → [[lon,lat], ...]
 function decodePolyline6(encoded) {
@@ -31,9 +31,30 @@ function decodePolyline6(encoded) {
   return coords
 }
 
+// Fetch elevations for [[lon,lat],...] coords via Valhalla /height.
+// Samples every Nth point to stay under request limits, then interpolates.
+async function fetchElevations(coords) {
+  const STEP = Math.max(1, Math.floor(coords.length / 500))
+  const sampled = coords.filter((_, i) => i % STEP === 0 || i === coords.length - 1)
+
+  const res = await fetch(`${VALHALLA_BASE}/height`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      range: true,
+      shape: sampled.map(([lon, lat]) => ({ lon, lat })),
+    }),
+  })
+  if (!res.ok) return null
+  const data = await res.json()
+  // Returns { range_height: [[dist_m, ele_m], ...] }
+  return data.range_height || null
+}
+
 /**
  * Route between an ordered list of [lon, lat] waypoints.
- * Returns { coords: [[lon,lat],...], distanceM, eleGainM, eleLossM } or null.
+ * Returns { coords: [[lon,lat],...], elevationProfile: [{distKm, eleM},...], distanceM, eleGainM, eleLossM }
+ * or null on failure.
  */
 export async function valhallaRoute(waypoints) {
   if (waypoints.length < 2) return null
@@ -44,24 +65,23 @@ export async function valhallaRoute(waypoints) {
     costing_options: {
       bicycle: {
         bicycle_type: 'Mountain',
-        use_trails: 1.0,       // strongly prefer trails
-        use_roads: 0.3,        // use roads when needed
-        use_hills: 0.8,        // willing to climb
+        use_trails: 1.0,
+        use_roads: 0.3,
+        use_hills: 0.8,
       },
     },
     format: 'json',
     directions_options: { units: 'km' },
   }
 
-  const res = await fetch(VALHALLA_URL, {
+  const res = await fetch(`${VALHALLA_BASE}/route`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
 
   if (!res.ok) {
-    const err = await res.text()
-    console.error('Valhalla error:', res.status, err)
+    console.error('Valhalla route error:', res.status, await res.text())
     return null
   }
 
@@ -69,25 +89,42 @@ export async function valhallaRoute(waypoints) {
   const trip = data.trip
   if (!trip || trip.status !== 0) return null
 
-  // Collect all leg shapes into one coordinate array
   const allCoords = []
-  let distanceM = 0, eleGainM = 0, eleLossM = 0
+  let distanceM = 0
 
   for (const leg of trip.legs) {
     const coords = decodePolyline6(leg.shape)
-    // Avoid duplicate junction points between legs
     if (allCoords.length > 0) coords.shift()
     allCoords.push(...coords)
-
     distanceM += leg.summary.length * 1000
-
-    // Valhalla provides max_up_slope/max_down_slope but not cumulative gain.
-    // Use maneuver-level elevation if available, else leave 0 for now.
-    for (const m of leg.maneuvers || []) {
-      if (m.elevation_gain) eleGainM += m.elevation_gain
-      if (m.elevation_loss) eleLossM += m.elevation_loss
-    }
   }
 
-  return { coords: allCoords, distanceM: Math.round(distanceM), eleGainM, eleLossM }
+  // Fetch elevations in parallel — non-blocking: route still works if it fails
+  let elevationProfile = null, eleGainM = 0, eleLossM = 0
+  try {
+    const rangeHeight = await fetchElevations(allCoords)
+    if (rangeHeight && rangeHeight.length >= 2) {
+      elevationProfile = rangeHeight.map(([distM, eleM]) => ({
+        distKm: distM / 1000,
+        eleM: Math.round(eleM),
+      }))
+      for (let i = 1; i < rangeHeight.length; i++) {
+        const diff = rangeHeight[i][1] - rangeHeight[i - 1][1]
+        if (diff > 0) eleGainM += diff
+        else eleLossM += -diff
+      }
+      eleGainM = Math.round(eleGainM)
+      eleLossM = Math.round(eleLossM)
+    }
+  } catch (e) {
+    console.warn('Valhalla /height failed:', e)
+  }
+
+  return {
+    coords: allCoords,
+    elevationProfile,
+    distanceM: Math.round(distanceM),
+    eleGainM,
+    eleLossM,
+  }
 }
