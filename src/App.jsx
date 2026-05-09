@@ -1,7 +1,5 @@
 import { useState, useCallback, useMemo, useRef } from 'react'
-import { snapToTrail } from './utils/trailSnap.js'
-import { routeWithVirtualNodes } from './utils/trailRouter.js'
-import { useTrailNetwork } from './hooks/useTrailNetwork.js'
+import { valhallaRoute } from './utils/valhallaRouter.js'
 import { computePathElevationProfile } from './utils/elevation.js'
 import { downloadPathGPX } from './utils/export.js'
 import { t } from './i18n/de.js'
@@ -16,6 +14,7 @@ import { SuggestionFlow } from './components/SuggestionFlow.jsx'
 import { Settings } from './components/Settings.jsx'
 import { Plans } from './components/Plans.jsx'
 import { BrushPanel, AddRouteModal } from './components/BrushPanel.jsx'
+import { useTrailNetwork } from './hooks/useTrailNetwork.js'
 import { useRoutes } from './hooks/useRoutes.js'
 import { useRides, useRouteRides } from './hooks/useRides.js'
 import { addRide, updateRide, deleteRide, addPlan } from './stores/rideStore.js'
@@ -58,7 +57,6 @@ export default function App() {
   })
 
   const { rides, riddenIds, refresh } = useRides()
-  const { network, edgeBBoxIndex } = useTrailNetwork()
   const { routes, allRoutes, connectivity } = useRoutes(filters, filters.sortBy || 'name')
 
   const selectedRoute = allRoutes.find((r) => r.id === selectedRouteId) || null
@@ -193,58 +191,31 @@ export default function App() {
   // ── Planner handlers ──────────────────────────────────────────────────────
   const lastMoveMs = useRef(0)
 
-  function buildSegments({ edgeIds, nodeIds, augEdges }) {
-    return edgeIds.map((eid, i) => {
-      const edge = augEdges[eid]
-      if (!edge) return null
-      const reversed = nodeIds[i] !== edge.from
-      const geometry = reversed ? [...edge.geometry].reverse() : edge.geometry
-      return { edgeId: eid, geometry, source_route_id: edge.source_route_id, ele_gain_m: edge.ele_gain_m || 0, ele_loss_m: edge.ele_loss_m || 0 }
-    }).filter(Boolean)
-  }
-
-  function handlePlannerMouseMove([lng, lat]) {
-    const now = Date.now()
-    if (now - lastMoveMs.current < 16) return // ~60fps
-    lastMoveMs.current = now
-    if (!network || !edgeBBoxIndex) return
-    const snap = snapToTrail([lng, lat], network, edgeBBoxIndex)
-    setSnapPreview(snap ? { coords: snap.snappedCoords } : null)
-  }
-
-  function handlePlannerClick([lng, lat]) {
-    if (!network || !edgeBBoxIndex) return
-    const snap = snapToTrail([lng, lat], network, edgeBBoxIndex)
-    if (!snap) {
-      setToast({ message: t('keinWegInDerNaehe'), id: Date.now() })
-      setTimeout(() => setToast(null), 2000)
-      return
+  async function rerouteAllWaypoints(wps) {
+    if (wps.length < 2) { setPlannedPath(null); return }
+    const result = await valhallaRoute(wps.map((wp) => wp.coords))
+    if (!result) {
+      setPlannedPath(null)
+      setToast({ message: t('keineVerbindung'), id: Date.now() })
+      setTimeout(() => setToast(null), 3000)
+    } else {
+      // Wrap as a single segment so BrushPanel + GPX export still work
+      setPlannedPath({
+        segments: [{ geometry: result.coords, ele_gain_m: result.eleGainM, ele_loss_m: result.eleLossM }],
+        totalDistM: result.distanceM,
+        totalEleGainM: result.eleGainM,
+        totalEleLossM: result.eleLossM,
+      })
     }
-    const newWp = { id: `wp_${Date.now()}`, snap, coords: snap.snappedCoords }
+  }
+
+  function handlePlannerMouseMove() {}  // no snap preview needed with Valhalla
+
+  async function handlePlannerClick([lng, lat]) {
+    const newWp = { id: `wp_${Date.now()}`, coords: [lng, lat] }
     const newWaypoints = [...waypoints, newWp]
     setWaypoints(newWaypoints)
-    setSnapPreview(null)
-
-    if (newWaypoints.length >= 2) {
-      const prevWp = newWaypoints[newWaypoints.length - 2]
-      const nodeEdgesIdx = new Map(Object.entries(network.node_edges || {}))
-      const routed = routeWithVirtualNodes(network, nodeEdgesIdx, prevWp.snap, snap)
-      if (!routed) {
-        setToast({ message: t('keineVerbindung'), id: Date.now() })
-        setTimeout(() => setToast(null), 3000)
-        setPlannedPath(null)
-        return
-      }
-      const segFromPrev = newWaypoints.length > 2 ? plannedPath : null
-      const segments = buildSegments(routed)
-      const newPath = {
-        segments: segFromPrev ? [...segFromPrev.segments, ...segments] : segments,
-        totalDistM: (segFromPrev?.totalDistM || 0) + routed.distanceM,
-        totalEleGainM: (segFromPrev?.totalEleGainM || 0) + routed.eleGainM,
-        totalEleLossM: (segFromPrev?.totalEleLossM || 0) + routed.eleLossM,
-      }
-      setPlannedPath(newPath)
-    }
+    if (newWaypoints.length >= 2) await rerouteAllWaypoints(newWaypoints)
   }
 
   function handleWaypointRemove(id) {
@@ -253,37 +224,8 @@ export default function App() {
     rerouteAllWaypoints(newWps)
   }
 
-  function rerouteAllWaypoints(wps) {
-    if (wps.length < 2) {
-      setPlannedPath(null)
-      return
-    }
-    const nodeEdgesIdx = new Map(Object.entries(network.node_edges || {}))
-    let allSegments = [], totalDistM = 0, totalEleGainM = 0, totalEleLossM = 0, failed = false
-    for (let i = 0; i < wps.length - 1; i++) {
-      const routed = routeWithVirtualNodes(network, nodeEdgesIdx, wps[i].snap, wps[i + 1].snap)
-      if (!routed) { failed = true; break }
-      allSegments = [...allSegments, ...buildSegments(routed)]
-      totalDistM += routed.distanceM
-      totalEleGainM += routed.eleGainM
-      totalEleLossM += routed.eleLossM
-    }
-    if (failed) {
-      setPlannedPath(null)
-      setToast({ message: t('keineVerbindung'), id: Date.now() })
-      setTimeout(() => setToast(null), 3000)
-    } else {
-      setPlannedPath({ segments: allSegments, totalDistM, totalEleGainM, totalEleLossM })
-    }
-  }
-
   function handleWaypointDrag(id, [lng, lat]) {
-    if (!network || !edgeBBoxIndex) return
-    const snap = snapToTrail([lng, lat], network, edgeBBoxIndex)
-    if (!snap) return
-    const newWps = waypoints.map((wp) =>
-      wp.id === id ? { ...wp, snap, coords: snap.snappedCoords } : wp
-    )
+    const newWps = waypoints.map((wp) => wp.id === id ? { ...wp, coords: [lng, lat] } : wp)
     setWaypoints(newWps)
     rerouteAllWaypoints(newWps)
   }
