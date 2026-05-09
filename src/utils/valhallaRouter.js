@@ -65,11 +65,13 @@ export async function valhallaRoute(waypoints) {
     costing_options: {
       bicycle: {
         bicycle_type: 'Mountain',
-        use_trails: 1.0,
-        use_roads: 0.3,
-        use_hills: 0.8,
+        use_trails: 1.0,         // max preference for trails/paths
+        use_roads: 0.0,          // max penalty for paved roads
+        use_hills: 1.0,          // fully willing to climb
+        avoid_bad_surfaces: 0.0, // MTB handles any surface
       },
     },
+    shortest: true,              // optimize distance not time — trails are direct, roads go around
     format: 'json',
     directions_options: { units: 'km' },
   }
