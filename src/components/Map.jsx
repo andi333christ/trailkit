@@ -60,6 +60,7 @@ export function Map({
   onPlannerClick,
   onPlannerMouseMove,
   onWaypointDrag,
+  elevationHoverPoint = null,
 }) {
   const mapContainer = useRef(null)
   const map = useRef(null)
@@ -177,6 +178,32 @@ export function Map({
           },
         })
 
+        // Direction arrows on all routes — symbol layer on the routes source
+        map.current.addLayer({
+          id: 'route-arrows',
+          type: 'symbol',
+          source: 'routes',
+          minzoom: 12,
+          layout: {
+            'symbol-placement': 'line',
+            'symbol-spacing': 120,
+            'text-field': '›',
+            'text-size': 15,
+            'text-rotation-alignment': 'map',
+            'text-keep-upright': false,
+            'text-allow-overlap': false,
+            'text-ignore-placement': false,
+          },
+          paint: {
+            'text-color': ['case',
+              ['boolean', ['get', 'isTrail'], false],
+              'rgba(255,255,255,0.85)',
+              'rgba(255,255,255,0.5)',
+            ],
+            'text-halo-width': 0,
+          },
+        })
+
         map.current.addSource('start-point', {
           type: 'geojson',
           data: { type: 'FeatureCollection', features: [] },
@@ -232,30 +259,21 @@ export function Map({
         })
 
 
-        // Trail edges — directional arrows showing downhill riding direction (populated via allRoutes effect)
-        map.current.addSource('trail-edges', {
+        // Elevation-profile hover marker
+        map.current.addSource('elevation-hover', {
           type: 'geojson',
           data: { type: 'FeatureCollection', features: [] },
         })
         map.current.addLayer({
-          id: 'trail-arrows',
-          type: 'symbol',
-          source: 'trail-edges',
-          minzoom: 13,
-          layout: {
-            'symbol-placement': 'line',
-            'symbol-spacing': 80,
-            'text-field': '›',
-            'text-size': 14,
-            'text-rotation-alignment': 'map',
-            'text-keep-upright': false,
-            'text-allow-overlap': false,
-            'text-ignore-placement': false,
-          },
+          id: 'elevation-hover-dot',
+          type: 'circle',
+          source: 'elevation-hover',
           paint: {
-            'text-color': 'rgba(255, 255, 255, 0.75)',
-            'text-halo-color': 'rgba(0, 0, 0, 0.0)',
-            'text-halo-width': 0,
+            'circle-radius': 7,
+            'circle-color': '#f2ece0',
+            'circle-stroke-width': 2.5,
+            'circle-stroke-color': '#c87840',
+            'circle-opacity': 0.95,
           },
         })
 
@@ -377,20 +395,20 @@ export function Map({
     }
   }, [tileLayer, mapLoaded])
 
-  // Trail arrow layer — uses full route geometries (smooth) instead of topology edges (choppy)
+  // Elevation-profile hover point on map
   useEffect(() => {
     if (!mapLoaded || !map.current) return
-    const source = map.current.getSource('trail-edges')
+    const source = map.current.getSource('elevation-hover')
     if (!source) return
-    const features = allRoutes
-      .filter((r) => isDownhillTrailRoute(r.id) && r.geometry)
-      .map((r) => ({
-        type: 'Feature',
-        geometry: r.geometry,
-        properties: { id: r.id },
-      }))
-    source.setData({ type: 'FeatureCollection', features })
-  }, [allRoutes, mapLoaded])
+    if (!elevationHoverPoint) {
+      source.setData({ type: 'FeatureCollection', features: [] })
+      return
+    }
+    source.setData({
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: elevationHoverPoint }, properties: {} }],
+    })
+  }, [elevationHoverPoint, mapLoaded])
 
   // Build GeoJSON features
   useEffect(() => {
@@ -428,6 +446,7 @@ export function Map({
             dimmed: isDimmed,
             selected: isSelected,
             title: r.title,
+            isTrail: isDownhillTrailRoute(r.id),
           },
         }
       })

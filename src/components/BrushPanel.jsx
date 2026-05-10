@@ -18,6 +18,7 @@ export function BrushPanel({
   onRemoveWaypoint,
   onReorderWaypoints,
   onPlannerSave,
+  onElevationHover,
 }) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -189,7 +190,7 @@ export function BrushPanel({
       {waypoints !== undefined && plannedPath && (
         <div className="brush-panel__elevation">
           <div className="label" style={{ marginBottom: 6 }}>Höhenprofil</div>
-          <ElevationProfile profile={elevationData} />
+          <ElevationProfile profile={elevationData} onHoverDistKm={onElevationHover} />
         </div>
       )}
 
@@ -282,7 +283,7 @@ export function BrushPanel({
         {(chain && chain.length > 0) && (
           <div className="brush-panel__elevation">
             <div className="label" style={{ marginBottom: 6 }}>Höhenprofil</div>
-            <ElevationProfile profile={elevationData} />
+            <ElevationProfile profile={elevationData} onHoverDistKm={onElevationHover} />
           </div>
         )}
 

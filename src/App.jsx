@@ -41,6 +41,7 @@ export default function App() {
   const [plannedPath, setPlannedPath] = useState(null)
   const [snapPreview, setSnapPreview] = useState(null)
   const [toast, setToast] = useState(null) // { message, id }
+  const [elevationHoverPoint, setElevationHoverPoint] = useState(null)
 
   const [filters, setFilters] = useState({
     difficulties: [],
@@ -252,6 +253,19 @@ export default function App() {
     setHighlightedRouteIds([])
   }
 
+  function handleElevationHover(distKm) {
+    if (distKm == null || !plannedPath?.segments?.[0]?.geometry) {
+      setElevationHoverPoint(null)
+      return
+    }
+    const coords = plannedPath.segments[0].geometry
+    const total = plannedPath.elevationData?.totalDistKm
+    if (!total || coords.length === 0) { setElevationHoverPoint(null); return }
+    const fraction = Math.min(1, Math.max(0, distKm / total))
+    const idx = Math.round(fraction * (coords.length - 1))
+    setElevationHoverPoint(coords[idx] || null)
+  }
+
   function handlePlannerClose() {
     setPlannerMode(false)
     setWaypoints([])
@@ -306,6 +320,7 @@ export default function App() {
             onPlannerClick={handlePlannerClick}
             onPlannerMouseMove={handlePlannerMouseMove}
             onWaypointDrag={handleWaypointDrag}
+            elevationHoverPoint={elevationHoverPoint}
           />
 
           {/* Color mode toggle */}
@@ -454,6 +469,7 @@ export default function App() {
             onClear={handleWaypointClear}
             onPlannerSave={handlePlannerSave}
             onClose={handlePlannerClose}
+            onElevationHover={handleElevationHover}
           />
         )}
 

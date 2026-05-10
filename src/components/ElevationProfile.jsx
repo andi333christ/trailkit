@@ -5,7 +5,7 @@ import { useState, useRef, useCallback } from 'react'
  * @param {Object} profile - returned by computeElevationProfile()
  * @param {number} [highlightDistKm] - distance to highlight on hover
  */
-export function ElevationProfile({ profile, highlightDistKm }) {
+export function ElevationProfile({ profile, highlightDistKm, onHoverDistKm }) {
   const [hoverIdx, setHoverIdx] = useState(null)
   const [mouseX, setMouseX] = useState(null)
   const containerRef = useRef(null)
@@ -108,11 +108,13 @@ export function ElevationProfile({ profile, highlightDistKm }) {
     }
     setHoverIdx(nearestIdx)
     setMouseX(svgX)
+    onHoverDistKm?.(points[nearestIdx]?.distKm ?? null)
   }
 
   function handleMouseLeave() {
     setHoverIdx(null)
     setMouseX(null)
+    onHoverDistKm?.(null)
   }
 
   return (
