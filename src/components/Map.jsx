@@ -61,6 +61,7 @@ export function Map({
   onPlannerMouseMove,
   onWaypointDrag,
   elevationHoverPoint = null,
+  onRoutePointInsert,
 }) {
   const mapContainer = useRef(null)
   const map = useRef(null)
@@ -81,6 +82,13 @@ export function Map({
   useEffect(() => { onPlannerClickRef.current = onPlannerClick }, [onPlannerClick])
   useEffect(() => { onPlannerMouseMoveRef.current = onPlannerMouseMove }, [onPlannerMouseMove])
   useEffect(() => { onWaypointDragRef.current = onWaypointDrag }, [onWaypointDrag])
+  const onRoutePointInsertRef = useRef(onRoutePointInsert)
+  useEffect(() => { onRoutePointInsertRef.current = onRoutePointInsert }, [onRoutePointInsert])
+  const plannedPathRef = useRef(plannedPath)
+  useEffect(() => { plannedPathRef.current = plannedPath }, [plannedPath])
+  const planWaypointsRef = useRef(planWaypoints)
+  useEffect(() => { planWaypointsRef.current = planWaypoints }, [planWaypoints])
+  const routeDragRef = useRef(null) // { insertAfterIdx } when dragging
   const plannerModeRef = useRef(plannerMode)
   useEffect(() => {
     plannerModeRef.current = plannerMode
@@ -88,6 +96,27 @@ export function Map({
       map.current.getCanvas().style.cursor = ''
     }
   }, [plannerMode])
+
+  // Route-drag helpers
+  function closestIdxOnLine(coords, [lng, lat]) {
+    let minD = Infinity, idx = 0
+    for (let i = 0; i < coords.length; i++) {
+      const dx = coords[i][0] - lng, dy = coords[i][1] - lat
+      const d = dx * dx + dy * dy
+      if (d < minD) { minD = d; idx = i }
+    }
+    return idx
+  }
+
+  function findInsertAfterIdx(routeCoords, waypoints, dragIdx) {
+    if (!waypoints || waypoints.length < 2) return 0
+    const wpIdxs = waypoints.map((wp) => closestIdxOnLine(routeCoords, wp.coords))
+    let insertAfter = 0
+    for (let i = 0; i < wpIdxs.length - 1; i++) {
+      if (dragIdx >= wpIdxs[i]) insertAfter = i
+    }
+    return insertAfter
+  }
 
   // Init map
   useEffect(() => {
@@ -260,6 +289,39 @@ export function Map({
         })
 
 
+        // Route-drag: hover handle + preview dashed lines
+        map.current.addSource('route-drag-handle', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        })
+        map.current.addLayer({
+          id: 'route-drag-handle-circle',
+          type: 'circle',
+          source: 'route-drag-handle',
+          paint: {
+            'circle-radius': 6,
+            'circle-color': '#f2ece0',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#c87840',
+            'circle-opacity': 0.9,
+          },
+        })
+        map.current.addSource('route-drag-preview', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        })
+        map.current.addLayer({
+          id: 'route-drag-preview-line',
+          type: 'line',
+          source: 'route-drag-preview',
+          paint: {
+            'line-color': '#c87840',
+            'line-width': 2,
+            'line-opacity': 0.55,
+            'line-dasharray': [5, 4],
+          },
+        })
+
         // Elevation-profile hover marker
         map.current.addSource('elevation-hover', {
           type: 'geojson',
@@ -308,7 +370,10 @@ export function Map({
         }
       })
 
+      let routeDragOccurred = false
+
       map.current.on('click', (e) => {
+        if (routeDragOccurred) { routeDragOccurred = false; return }
         if (plannerModeRef.current) {
           onPlannerClickRef.current?.([e.lngLat.lng, e.lngLat.lat])
         } else {
@@ -323,13 +388,79 @@ export function Map({
       let hoveredRouteId = null
       let lastPlannerMove = 0
 
-      // General mousemove: planner snap preview + crosshair cursor across entire map
+      // Hover over planned route line → show grab handle
+      map.current.on('mousemove', 'plan-path-line', (e) => {
+        if (!plannerModeRef.current || routeDragRef.current) return
+        const routeCoords = plannedPathRef.current?.segments?.[0]?.geometry
+        if (!routeCoords) return
+        map.current.getCanvas().style.cursor = 'grab'
+        const idx = closestIdxOnLine(routeCoords, [e.lngLat.lng, e.lngLat.lat])
+        const pt = routeCoords[idx]
+        map.current.getSource('route-drag-handle')?.setData({
+          type: 'FeatureCollection',
+          features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: pt }, properties: {} }],
+        })
+      })
+
+      map.current.on('mouseleave', 'plan-path-line', () => {
+        if (routeDragRef.current) return
+        map.current.getSource('route-drag-handle')?.setData({ type: 'FeatureCollection', features: [] })
+        if (plannerModeRef.current) map.current.getCanvas().style.cursor = 'crosshair'
+      })
+
+      // Mousedown on planned route → start drag
+      map.current.on('mousedown', 'plan-path-line', (e) => {
+        if (!plannerModeRef.current) return
+        e.preventDefault()
+        const routeCoords = plannedPathRef.current?.segments?.[0]?.geometry
+        if (!routeCoords) return
+        const [lng, lat] = [e.lngLat.lng, e.lngLat.lat]
+        const dragIdx = closestIdxOnLine(routeCoords, [lng, lat])
+        const insertAfterIdx = findInsertAfterIdx(routeCoords, planWaypointsRef.current, dragIdx)
+        routeDragRef.current = { insertAfterIdx }
+        map.current.dragPan.disable()
+        map.current.getCanvas().style.cursor = 'grabbing'
+      })
+
+      // Global mouseup → finish drag
+      map.current.on('mouseup', (e) => {
+        if (!routeDragRef.current) return
+        const { insertAfterIdx } = routeDragRef.current
+        const coords = [e.lngLat.lng, e.lngLat.lat]
+        routeDragRef.current = null
+        routeDragOccurred = true
+        map.current.dragPan.enable()
+        if (plannerModeRef.current) map.current.getCanvas().style.cursor = 'crosshair'
+        map.current.getSource('route-drag-handle')?.setData({ type: 'FeatureCollection', features: [] })
+        map.current.getSource('route-drag-preview')?.setData({ type: 'FeatureCollection', features: [] })
+        onRoutePointInsertRef.current?.(coords, insertAfterIdx)
+      })
+
+      // General mousemove: planner snap preview + route drag preview
       map.current.on('mousemove', (e) => {
+        const [lng, lat] = [e.lngLat.lng, e.lngLat.lat]
+
+        if (routeDragRef.current) {
+          // Move drag handle with mouse
+          map.current.getSource('route-drag-handle')?.setData({
+            type: 'FeatureCollection',
+            features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: {} }],
+          })
+          // Show dashed preview lines to adjacent waypoints
+          const wps = planWaypointsRef.current || []
+          const { insertAfterIdx } = routeDragRef.current
+          const lines = []
+          if (wps[insertAfterIdx]) lines.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [wps[insertAfterIdx].coords, [lng, lat]] }, properties: {} })
+          if (wps[insertAfterIdx + 1]) lines.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [[lng, lat], wps[insertAfterIdx + 1].coords] }, properties: {} })
+          map.current.getSource('route-drag-preview')?.setData({ type: 'FeatureCollection', features: lines })
+          return
+        }
+
         if (!plannerModeRef.current) return
         map.current.getCanvas().style.cursor = 'crosshair'
         const now = Date.now()
         if (now - lastPlannerMove > 16) {
-          onPlannerMouseMoveRef.current?.([e.lngLat.lng, e.lngLat.lat])
+          onPlannerMouseMoveRef.current?.([lng, lat])
           lastPlannerMove = now
         }
       })

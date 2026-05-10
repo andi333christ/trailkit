@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { t } from '../i18n/de.js'
 import { downloadGPX } from '../utils/export.js'
+import { ElevationProfile } from './ElevationProfile.jsx'
+import { computeElevationProfile } from '../utils/elevation.js'
 
 const MONTH_NAMES = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D']
 
@@ -8,6 +10,11 @@ export function RouteDetail({ route, rides, riddenIds, onClose, onLogRide, onEdi
   const [showLogForm, setShowLogForm] = useState(false)
   const [editingRide, setEditingRide] = useState(null)
   const isRidden = riddenIds.has(route.id)
+
+  const elevationProfile = useMemo(() => {
+    if (!route.geometry) return null
+    return computeElevationProfile([route])
+  }, [route.id])
 
   function handleExport() {
     downloadGPX(route, route.title)
@@ -109,6 +116,13 @@ export function RouteDetail({ route, rides, riddenIds, onClose, onLogRide, onEdi
                 </span>
               ))}
             </div>
+          </Section>
+        )}
+
+        {/* Elevation profile */}
+        {elevationProfile && (
+          <Section title="Höhenprofil">
+            <ElevationProfile profile={elevationProfile} />
           </Section>
         )}
 

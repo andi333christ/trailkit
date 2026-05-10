@@ -253,6 +253,14 @@ export default function App() {
     setHighlightedRouteIds([])
   }
 
+  function handleRoutePointInsert(coords, insertAfterIdx) {
+    const newWp = { id: `wp_${Date.now()}`, coords }
+    const newWps = [...waypoints]
+    newWps.splice(insertAfterIdx + 1, 0, newWp)
+    setWaypoints(newWps)
+    rerouteAllWaypoints(newWps)
+  }
+
   function handleElevationHover(distKm) {
     if (distKm == null || !plannedPath?.segments?.[0]?.geometry) {
       setElevationHoverPoint(null)
@@ -321,6 +329,7 @@ export default function App() {
             onPlannerMouseMove={handlePlannerMouseMove}
             onWaypointDrag={handleWaypointDrag}
             elevationHoverPoint={elevationHoverPoint}
+            onRoutePointInsert={handleRoutePointInsert}
           />
 
           {/* Color mode toggle */}
