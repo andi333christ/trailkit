@@ -186,9 +186,9 @@ export function Map({
           minzoom: 12,
           layout: {
             'symbol-placement': 'line',
-            'symbol-spacing': 120,
-            'text-field': '›',
-            'text-size': 15,
+            'symbol-spacing': 140,
+            'text-field': ['case', ['boolean', ['get', 'isTrail'], false], '›T', '›'],
+            'text-size': 28,
             'text-rotation-alignment': 'map',
             'text-keep-upright': false,
             'text-allow-overlap': false,
@@ -197,10 +197,11 @@ export function Map({
           paint: {
             'text-color': ['case',
               ['boolean', ['get', 'isTrail'], false],
-              'rgba(255,255,255,0.85)',
-              'rgba(255,255,255,0.5)',
+              'rgba(255,255,255,0.9)',
+              'rgba(255,255,255,0.55)',
             ],
-            'text-halo-width': 0,
+            'text-halo-color': 'rgba(0,0,0,0.25)',
+            'text-halo-width': 1,
           },
         })
 
