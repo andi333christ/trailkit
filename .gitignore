@@ -2,5 +2,7 @@ node_modules/
 dist/
 .env
 *.local
+.DS_Store
 src/data/routes.json
 src/data/connectivity.json
+src/data/trail_edges.geojson
