@@ -215,7 +215,17 @@ def snap_route(pts):
     print(f"\n    pedestrian snap too short ({_path_length_m(snapped)/1000:.1f} km), trying chunked", end=" ", flush=True)
 
     # Step 3 — chunked pedestrian
-    return _snap_chunked(pts, "pedestrian")
+    snapped = _snap_chunked(pts, "pedestrian")
+
+    # Final guard — if still too short, trails not in OSM; caller falls back to enriched GPX
+    if _path_length_m(snapped) < input_len * 0.4:
+        raise ValueError(
+            f"all snap attempts too short "
+            f"({_path_length_m(snapped)/1000:.2f} km vs {input_len/1000:.2f} km input) "
+            f"— trails likely not in OSM"
+        )
+
+    return snapped
 
 
 def fetch_elevation(pts):
@@ -260,7 +270,9 @@ def process_route(slug, gpx_filename, name):
     try:
         snapped = snap_route(pts)
     except Exception as e:
-        print(f"\n    WARNING: trace_route failed ({e}), keeping original", file=sys.stderr)
+        print(f"\n    WARNING: snap failed ({e}), falling back to enriched GPX", file=sys.stderr)
+        if dst.exists():
+            dst.unlink()
         return False
 
     elevations = fetch_elevation(snapped)
