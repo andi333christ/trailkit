@@ -90,15 +90,22 @@ verfügbar" if elevation is absent.
 
 ---
 
-## Pending: map-matching GPX to OSM (`docs/session-prompt-map-matching.md`)
+## Done: map-matching GPX to OSM (branch `feature/snap-routes-osm`)
 
-The remaining visual inconsistency: GPX route lines are low-res and slightly offset from
-OSM, while the Valhalla planned route is smooth and accurate. Both visible at once looks
-confusing in planner mode.
+All 151 GPX tracks have been snapped to OSM geometry via `scripts/snap_routes_to_osm.py`.
+Snapped files live in `gpx-snapped/`; `build_routes.py` prefers them over `gpx-enriched/`.
 
-Fix: run all GPX tracks through Valhalla `/trace_route` (map-matching endpoint) to snap
-them to OSM geometry. See `docs/session-prompt-map-matching.md` for the full session
-prompt to continue this work.
+**Snap fallback chain per route:**
+1. Valhalla `trace_route` with MTB costing (best quality)
+2. Pedestrian costing if MTB snap fails or returns <40% of input length
+3. Chunked pedestrian (60-pt windows) if single-pass is still too short
+4. If all three fail length check: file deleted, `build_routes.py` falls back to enriched GPX
+
+**Known routing gap:** 26 routes used pedestrian fallback because their trails aren't
+tagged `bicycle=yes` / `mtb:scale` in OSM. These display correctly (snapped geometry),
+but Valhalla live routing (drag-reroute in planner) routes around them via roads.
+Priority cases: Lainzer Tiergarten, Allander MTB-Runde.
+Full list + fix instructions: `docs/osm-fix-zubringer-satzberg.md`.
 
 ---
 
@@ -112,5 +119,6 @@ prompt to continue this work.
 | `src/components/BrushPanel.jsx` | Passes `onElevationHover` to ElevationProfile |
 | `src/components/ElevationProfile.jsx` | `onHoverDistKm` callback prop |
 | `src/components/RouteDetail.jsx` | Elevation profile section added |
-| `docs/osm-fix-zubringer-satzberg.md` | OSM fix tutorial for broken Valhalla routing |
-| `docs/session-prompt-map-matching.md` | Prompt for next session (map-matching) |
+| `docs/osm-fix-zubringer-satzberg.md` | OSM contribution backlog (routing gaps) |
+| `docs/session-prompt-map-matching.md` | Session prompt used for map-matching work |
+| `scripts/snap_routes_to_osm.py` | Map-match GPX tracks to OSM via Valhalla |
