@@ -28,6 +28,7 @@ DATA_DIR = Path('/Users/simongraf/projects/bike-routes/data/ww-info')
 OUTPUT_DIR = Path(__file__).parent.parent / "src" / "data"
 ROUTES_DIR = DATA_DIR / "routes"
 GPX_DIR = DATA_DIR / "gpx-enriched"
+GPX_SNAPPED_DIR = DATA_DIR / "gpx-snapped"
 CONNECTIVITY_THRESHOLD_M = 100  # meters — routes within this distance connect
 GRID_DEG = 0.05  # spatial index cell size in degrees
 
@@ -154,7 +155,8 @@ def load_all_trackpoints():
         if not slug or not gpx_enriched_file:
             continue
         
-        gpx_path = GPX_DIR / gpx_enriched_file
+        snapped_path = GPX_SNAPPED_DIR / gpx_enriched_file
+        gpx_path = snapped_path if snapped_path.exists() else GPX_DIR / gpx_enriched_file
         if not gpx_path.exists():
             print(f"  WARNING: GPX not found: {gpx_path}", file=sys.stderr)
             trackpoints[slug] = []
